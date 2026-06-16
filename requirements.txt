@@ -1,0 +1,6 @@
+requests
+python-dateutil
+urllib3
+PyPDF2
+pdfminer.six
+openai
