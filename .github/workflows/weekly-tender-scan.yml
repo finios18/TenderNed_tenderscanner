@@ -39,3 +39,35 @@ jobs:
         with:
           name: tender-results
           path: recent_downloads/
+
+      - name: Create mail summary
+        run: |
+          echo "TenderNed scan afgerond." > mail_summary.txt
+          echo "" >> mail_summary.txt
+
+          if [ -d "recent_downloads/GO" ] && [ "$(find recent_downloads/GO -mindepth 1 -maxdepth 1 -type d | wc -l)" -gt 0 ]; then
+            echo "Er zijn interessante GO-aanbestedingen gevonden." >> mail_summary.txt
+            echo "" >> mail_summary.txt
+            echo "JSON-samenvattingen:" >> mail_summary.txt
+            find recent_downloads/GO -name "openai_analysis_*.json" -print >> mail_summary.txt
+          else
+            echo "Er zijn vandaag geen interessante aanbestedingen gevonden." >> mail_summary.txt
+          fi
+
+          echo "" >> mail_summary.txt
+          echo "Download aanbestedingsdocumenten/artifact:" >> mail_summary.txt
+          echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> mail_summary.txt
+
+      - name: Send tender email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "TenderNed scan resultaat"
+          to: ${{ secrets.MAIL_TO }}
+          from: Tender Bot <${{ secrets.SMTP_USERNAME }}>
+          secure: true
+          body: file://mail_summary.txt
+          attachments: recent_downloads/GO/**/openai_analysis_*.json
