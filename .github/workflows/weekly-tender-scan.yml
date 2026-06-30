@@ -31,7 +31,7 @@ jobs:
           python tender_scan.py \
             --days 14 \
             --pages 1000 \
-            --download_dir recent_downloads \ 
+            --download_dir recent_downloads \
             --analyze_openai
 
       - name: Upload results
