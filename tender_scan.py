@@ -13,6 +13,7 @@ from dateutil import parser as dtp
 import requests
 import zipfile
 import json
+import shutil
 
 # Robustness / timeboxing
 import multiprocessing as mp
@@ -139,10 +140,6 @@ def build_tenderned_list_params(page=0, size=50):
 
 # Keywords voor IT / data detachering
 KEYWORDS = [
-    "inhuur",
-    "detachering",
-    "tijdelijke inzet",
-    "tijdelijk personeel",
     "data engineer",
     "data scientist",
     "data architect",
@@ -156,10 +153,15 @@ KEYWORDS = [
     "software developer",
     "it architect",
     "data-specialist",
-    "personeelsinhuur",
     "data-engineering",
     "data-analyse",
-    "data-science"
+    "data-science",
+    "busines analist",
+    "business analyst",
+    "proces analist",
+    "procesanalist",
+    "proces manager",
+    "procesmanager",
 ]
 
 # Documenttitels die waarschijnlijk de hoofdleidraad / het beschrijvend document aanduiden.
@@ -233,7 +235,7 @@ Beslisregels:
 Geef GO wanneer de kern van de opdracht voldoet aan ALLE onderstaande voorwaarden:
 1. Het gaat primair om detachering, flexibele personeelsinhuur, tijdelijke inhuur, terbeschikkingstelling van professionals/kandidaten, recruitment/bemiddeling, brokerachtige dienstverlening, minicompetities of een raamovereenkomst voor dergelijke inzet.
 2. De gevraagde dienstverlening past bij een detacheerder: kandidaten werven, selecteren, aanbieden, inzetten, begeleiden en/of contractueel/administratief afhandelen.
-3. De opdracht valt binnen onze primaire domeinen, OF is een brede flexibele personeelsinhuur-opdracht waarin professionals via detachering/ZZP-bemiddeling worden geleverd.
+3. De opdracht valt binnen onze primaire domeinen.
 4. Er is geen harde knock-out eis gevonden die een normale detacheerder evident uitsluit.
 5. De totale maximale waarde is niet expliciet hoger dan EUR 80.000.000.
 
@@ -841,6 +843,51 @@ def process_pdf_blob(pdf_bytes: bytes, save_as_path: str, pdf_parser: PdfParseSu
         return "OK", hits
     return "FAIL", []
 
+
+# ==== Helpers: output folders ====
+def _safe_move_publication_folder(current_outdir: str, download_dir: str, pid, category: str) -> str:
+    """Verplaats de map van één publicatie naar recent_downloads/GO of recent_downloads/Overig.
+
+    Als er al een map met hetzelfde publicatie-ID bestaat, maken we een unieke suffix.
+    Returnt het nieuwe pad. Bij fout blijft het oude pad leidend.
+    """
+    if not current_outdir or not os.path.isdir(current_outdir):
+        return current_outdir
+
+    category_root = os.path.join(download_dir, category)
+    os.makedirs(category_root, exist_ok=True)
+
+    base_name = str(pid)
+    target = os.path.join(category_root, base_name)
+
+    if os.path.abspath(current_outdir) == os.path.abspath(target):
+        return target
+
+    if os.path.exists(target):
+        suffix = datetime.now(gettz("Europe/Amsterdam")).strftime("%Y%m%d_%H%M%S")
+        target = os.path.join(category_root, f"{base_name}_{suffix}")
+
+    try:
+        shutil.move(current_outdir, target)
+        return target
+    except Exception as e:
+        log(f"[MOVE FAIL] {current_outdir} → {target}: {e}")
+        return current_outdir
+
+
+def _replace_path_prefix(value, old_prefix: str, new_prefix: str):
+    """Update paden in nested dict/list-structuren nadat een publicatiemap is verplaatst."""
+    if isinstance(value, dict):
+        for k, v in list(value.items()):
+            if isinstance(v, str) and old_prefix and v.startswith(old_prefix):
+                value[k] = new_prefix + v[len(old_prefix):]
+            else:
+                _replace_path_prefix(v, old_prefix, new_prefix)
+    elif isinstance(value, list):
+        for item in value:
+            _replace_path_prefix(item, old_prefix, new_prefix)
+    return value
+
 # ==== Core ====
 def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_downloads",
                 throttle_s=0.25, zip_max_mb=200, zip_follow_nested=False,
@@ -938,6 +985,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                 os.makedirs(outdir, exist_ok=True)
 
                 any_keyword = False
+                # Wordt gebruikt om na OpenAI-analyse de publicatiemap te sorteren naar GO of Overig.
+                output_category = "Overig"
                 # Bewaar alleen documenten die daadwerkelijk zijn gedownload/verwerkt.
                 # Leidraad-detectie gebeurt bewust pas NA de keyword-filter.
                 downloaded_documents = []
@@ -1125,6 +1174,9 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             openai_results_by_publication[pid] = analysis_result
                             if analysis_result.get("status") == "OK":
                                 a = analysis_result.get("analysis") or {}
+                                decision = str(a.get("decision") or "").strip().upper()
+                                if decision == "GO":
+                                    output_category = "GO"
                                 print(f"   → OpenAI oordeel: {a.get('decision')} | confidence: {a.get('confidence')} | {a.get('reason_short')}")
                                 if analysis_result.get("output_path"):
                                     print(f"   → OpenAI analyse opgeslagen: {analysis_result['output_path']}")
@@ -1147,6 +1199,18 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             print(f"      - {cand['name']} | match: {', '.join(cand['title_hits'])} | pad: {cand['path']}")
                 else:
                     print("   → Geen keyword-hit → leidraad-check overgeslagen")
+
+                # Sorteer pas ná de eventuele OpenAI-analyse, want dan weten we pas of iets echt GO is.
+                # Zonder --analyze_openai bewaren we de oude structuur, omdat er dan geen GO-oordeel bestaat.
+                if analyze_openai:
+                    old_outdir = outdir
+                    outdir = _safe_move_publication_folder(outdir, download_dir, pid, output_category)
+                    if outdir != old_outdir:
+                        _replace_path_prefix(downloaded_documents, old_outdir, outdir)
+                        _replace_path_prefix(leidraad_candidates_by_publication.get(pid), old_outdir, outdir)
+                        _replace_path_prefix(supporting_doc_candidates_by_publication.get(pid), old_outdir, outdir)
+                        _replace_path_prefix(openai_results_by_publication.get(pid), old_outdir, outdir)
+                    print(f"   → Documentmap opgeslagen onder: {output_category}/{os.path.basename(outdir)}")
 
                 processed += 1
                 hr()
