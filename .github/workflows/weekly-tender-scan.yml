@@ -51,7 +51,7 @@ jobs:
             echo "JSON-samenvattingen:" >> mail_summary.txt
             find recent_downloads/GO -name "openai_analysis_*.json" -print >> mail_summary.txt
           else
-            echo "Er zijn vandaag geen interessante aanbestedingen gevonden." >> mail_summary.txt
+            echo "Er zijn de afgelopen 8 dagen geen interessante aanbestedingen gevonden." >> mail_summary.txt
           fi
 
           echo "" >> mail_summary.txt
