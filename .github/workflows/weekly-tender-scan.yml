@@ -34,29 +34,19 @@ jobs:
             --download_dir recent_downloads \
             --analyze_openai
 
+      - name: Create mail summary
+        id: mail_summary
+        run: |
+          python go_mail_report.py \
+            --results recent_downloads/current_scan_results.json \
+            --output_dir recent_downloads \
+            --run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: tender-results
           path: recent_downloads/
-
-      - name: Create mail summary
-        run: |
-          echo "TenderNed scan afgerond." > mail_summary.txt
-          echo "" >> mail_summary.txt
-
-          if [ -d "recent_downloads/GO" ] && [ "$(find recent_downloads/GO -mindepth 1 -maxdepth 1 -type d | wc -l)" -gt 0 ]; then
-            echo "Er zijn interessante GO-aanbestedingen gevonden." >> mail_summary.txt
-            echo "" >> mail_summary.txt
-            echo "JSON-samenvattingen:" >> mail_summary.txt
-            find recent_downloads/GO -name "openai_analysis_*.json" -print >> mail_summary.txt
-          else
-            echo "Er zijn de afgelopen 8 dagen geen interessante aanbestedingen gevonden." >> mail_summary.txt
-          fi
-
-          echo "" >> mail_summary.txt
-          echo "Download aanbestedingsdocumenten/artifact:" >> mail_summary.txt
-          echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> mail_summary.txt
 
       - name: Send tender email
         uses: dawidd6/action-send-mail@v3
@@ -65,9 +55,9 @@ jobs:
           server_port: ${{ secrets.SMTP_PORT }}
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "TenderNed scan resultaat"
+          subject: ${{ steps.mail_summary.outputs.subject }}
           to: ${{ secrets.MAIL_TO }}
           from: Tender Bot <${{ secrets.SMTP_USERNAME }}>
           secure: true
-          body: file://mail_summary.txt
-          attachments: recent_downloads/GO/**/openai_analysis_*.json
+          body: file://recent_downloads/mail_summary.txt
+          attachments: ${{ steps.mail_summary.outputs.attachments }}

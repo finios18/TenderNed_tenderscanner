@@ -186,6 +186,21 @@ CPV_WHITELIST_RAW
 
 ## Keyword Detection
 
+The content keywords also include detachering, personeelsinhuur,
+terbeschikkingstelling, recruitment, data governance and data stewardship.
+
+All recorded skip reasons are saved to `<download_dir>/overgeslagen_overzicht.json`
+and shown in the terminal. Events include date/CPV/content filters, missing
+documents or download links, unsupported types, PDF failures/timeouts, ZIP size,
+format and entry problems, disabled nested ZIP processing, missing lead documents,
+disabled/failed AI analysis and MAYBE/NO_GO outcomes. API failures and reaching
+the configured page limit are also recorded. An event includes the publication
+and document context where available; CPV-rejected publications do not fetch
+document lists. The report describes the current run and is saved even if the
+scan raises an exception after starting. The existing missing-lead-document
+report remains available separately. Both JSON files are included in the
+GitHub Actions download artifact.
+
 The script searches document text for keywords including:
 
 ```text
@@ -252,6 +267,20 @@ Examples:
 ---
 
 ## AI Tender Assessment
+
+The workflow emails one readable `GO-aanbestedingen.html` attachment instead of
+raw JSON files. It contains an overview table and per-tender sections for the
+commercial conclusion, client, deadline, value, contract, roles, requirements,
+risks, award criteria, planning and advice. Missing values show as “Onbekend”.
+Open the attachment in a browser. The mail subject includes the GO count and
+the body links to the full download artifact. With no GO results, the email
+has no attachment.
+
+The scanner writes `current_scan_results.json` containing only AI results from
+the current run. `go_mail_report.py` generates the mail from this file; historical
+GO folders are not included. This formatting step does not call OpenAI. Original
+analysis JSONs and raw responses remain in the download artifact, alongside the
+HTML summary. The workflow creates the summary before uploading the artifact.
 
 When enabled, the script uploads the detected lead document to OpenAI and requests a structured evaluation.
 

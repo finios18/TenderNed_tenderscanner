@@ -73,6 +73,20 @@ def _build_session() -> requests.Session:
 
 SESSION = _build_session()
 
+SKIP_EVENTS = []
+
+
+def record_skip(reason, publication_id=None, title="", organisation="", document_name="", document_type="", detail="", documents=None):
+    """Bewaar één concrete reden waarom een publicatie/document/stap niet doorgaat."""
+    if publication_id is None and reason.startswith("api_"):
+        endpoint = detail.split(": ", 1)[-1].split("?", 1)[0]
+        publication_id = next((part for part in endpoint.split("/") if part.isdigit()), None)
+    SKIP_EVENTS.append({
+        "reason": reason, "publication_id": str(publication_id) if publication_id is not None else None,
+        "title": title, "organisation": organisation, "document_name": document_name,
+        "document_type": document_type, "detail": detail, "documents": documents or [],
+    })
+
 # ==== Instellingen ====
 DAYS_BACK_DEFAULT = 1
 
@@ -140,6 +154,12 @@ def build_tenderned_list_params(page=0, size=50):
 
 # Keywords voor IT / data detachering
 KEYWORDS = [
+    "detachering",
+    "personeelsinhuur",
+    "terbeschikkingstelling",
+    "recruitment",
+    "data governance",
+    "data stewardship",
     "data engineer",
     "data scientist",
     "data architect",
@@ -446,6 +466,7 @@ def get_json(url, params=None, max_seconds: int = NET_TIMEOUT_S):
             status = r.status_code
 
             if status == 404:
+                record_skip("api_not_found", detail=url)
                 log(f"[HTTP 404] {url} → publicatie niet gevonden, wordt overgeslagen")
                 return None
 
@@ -456,6 +477,7 @@ def get_json(url, params=None, max_seconds: int = NET_TIMEOUT_S):
                 # Laat session-retries/backoff hun werk doen; we proberen opnieuw zolang we tijd over hebben.
                 if time.monotonic() >= deadline:
                     log(f"[NET TIMEOUT] {url} → >{max_seconds}s, JSON wordt overgeslagen")
+                    record_skip("api_http_error", detail=f"HTTP {status}: {url}")
                     return None
                 continue
 
@@ -463,6 +485,7 @@ def get_json(url, params=None, max_seconds: int = NET_TIMEOUT_S):
                 data = r.json()
             except ValueError:
                 log(f"[JSON PARSE FAIL] {url} → response is geen geldige JSON")
+                record_skip("api_invalid_json", detail=url)
                 return None
 
             dur = time.monotonic() - t0
@@ -474,6 +497,7 @@ def get_json(url, params=None, max_seconds: int = NET_TIMEOUT_S):
             dur = time.monotonic() - t0
             if time.monotonic() >= deadline:
                 log(f"[NET TIMEOUT] {url} → >{max_seconds}s, laatste error: {e}")
+                record_skip("api_timeout", detail=f"{url}: {e}")
                 return None
             # kort loggen, dan opnieuw proberen zolang deadline niet overschreden is
             if dur >= SLOW_STEP_S or VERBOSE_STEPS:
@@ -789,7 +813,7 @@ def looks_like_zip(dtype: str, name: str) -> bool:
         return True
     return False
 
-def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent_label: str, throttle_s: float):
+def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent_label: str, throttle_s: float, on_skip=None):
     """
     Leest ZIP uit bytes en yield tuples van:
     (entry_label, entry_filename, entry_bytes, entry_is_pdf, entry_is_zip)
@@ -800,9 +824,13 @@ def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent
     try:
         zf = zipfile.ZipFile(BytesIO(zip_blob))
     except zipfile.BadZipFile:
+        if on_skip:
+            on_skip("zip_invalid", parent_label, "zip")
         print(f"       [ZIP] {parent_label} → onleesbare/defecte zip (BadZipFile)")
         return
     except Exception as e:
+        if on_skip:
+            on_skip("zip_open_failed", parent_label, "zip", str(e))
         print(f"       [ZIP] {parent_label} → zip openen FAIL: {e}")
         return
 
@@ -812,15 +840,21 @@ def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent
             continue
         # Skip resource forks etc.
         if os.path.basename(zi.filename).startswith("__MACOSX"):
+            if on_skip:
+                on_skip("zip_resource_file", zi.filename, "onbekend")
             continue
 
         try:
             data = zf.read(zi)
         except RuntimeError as e:
+            if on_skip:
+                on_skip("zip_entry_unreadable", zi.filename, os.path.splitext(zi.filename)[1].lstrip("."), str(e))
             # password-protected or encrypted
             print(f"       [ZIP] {zi.filename} → niet leesbaar (mogelijk encrypted): {e}")
             continue
         except Exception as e:
+            if on_skip:
+                on_skip("zip_entry_unreadable", zi.filename, os.path.splitext(zi.filename)[1].lstrip("."), str(e))
             print(f"       [ZIP] {zi.filename} → lezen FAIL: {e}")
             continue
 
@@ -834,7 +868,7 @@ def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent
 
         # nested?
         if is_zip and follow_nested:
-            for nested in safe_zip_iter(data, follow_nested, base_outdir, label, throttle_s):
+            for nested in safe_zip_iter(data, follow_nested, base_outdir, label, throttle_s, on_skip=on_skip):
                 yield nested
 
 def process_pdf_blob(pdf_bytes: bytes, save_as_path: str, pdf_parser: PdfParseSupervisor, label: str = ""):
@@ -919,6 +953,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
     """
 
     os.makedirs(download_dir, exist_ok=True)
+    SKIP_EVENTS.clear()
 
     # Toon actieve TenderNed API-filters aan het begin van de run.
     log(f"Actieve TenderNed filters: {build_tenderned_list_params(page=0, size=50)}")
@@ -956,6 +991,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                 pid = it.get("publicatieId") or it.get("id")
                 pdt = it.get("publicatieDatum") or it.get("datum") or it.get("publicationDate")
                 if not within_last_days(pdt, days_back=days_back):
+                    record_skip("outside_date_window_or_invalid_date", pid, it.get("aanbestedingNaam", ""),
+                                detail=str(pdt or "Publicatiedatum ontbreekt"))
                     continue
 
                 any_recent = True
@@ -985,6 +1022,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
                 # CPV-whitelist check (alleen doorgaan als er overlap is)
                 if not (cpv_all_match & CPV_WHITELIST):
+                    record_skip("cpv_no_match" if cpv_all_display else "cpv_missing", pid, naam, org,
+                                detail=", ".join(cpv_all_display))
                     print("   → CPV niet in whitelist → documenten overslaan")
                     skipped_cpv += 1
                     hr()
@@ -1011,6 +1050,12 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                 downloaded_documents = []
                 document_inventory = []
 
+                def skip_document(reason, name, doc_type, detail=""):
+                    record_skip(reason, pid, naam, org, name, doc_type, detail)
+
+                if not docs:
+                    record_skip("no_documents_available", pid, naam, org)
+
                 for i, d in enumerate(docs, start=1):
                     dname = d.get("documentNaam") or f"doc_{i}"
                     dtype = ((d.get("typeDocument") or {}).get("code")) or ""
@@ -1024,6 +1069,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
 
                     if not dlrel:
+                        skip_document("missing_download_link", dname, dtype)
                         print(f"     [{i}] {dname} ({dtype or 'onbekend'}) → geen download-link")
                         continue
 
@@ -1049,6 +1095,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 "read_status": status,
                                 "keyword_hits": hits,
                             })
+                            if status != "OK":
+                                skip_document("pdf_timeout" if status == "TIMEOUT" else "pdf_unreadable", dname, "pdf")
 
                             if status == "OK":
                                 if hits:
@@ -1066,6 +1114,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 print(f"     [{i}] {fn} → download: OK | lezen: FAIL")
 
                         except Exception as e:
+                            skip_document("pdf_download_or_processing_failed", dname, "pdf", str(e))
                             print(f"     [{i}] {dname} (pdf) → download/lezen FAIL: {e}")
 
                         time.sleep(throttle_s)
@@ -1083,6 +1132,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             # size check
                             size_mb = len(blob) / (1024 * 1024)
                             if size_mb > float(zip_max_mb):
+                                skip_document("zip_too_large", dname, "zip", f"{size_mb:.1f} MB > {zip_max_mb} MB")
                                 print(
                                     f"     [{i}] {dname} (zip ~{size_mb:.1f} MB) → overgeslagen (groter dan {zip_max_mb} MB)"
                                 )
@@ -1102,6 +1152,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 base_outdir=zip_outdir,
                                 parent_label=zip_stem,
                                 throttle_s=throttle_s,
+                                on_skip=skip_document,
                             ):
                                 document_inventory.append({
                                     "name": label,
@@ -1129,6 +1180,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                         "read_status": status,
                                         "keyword_hits": hits,
                                     })
+                                    if status != "OK":
+                                        skip_document("pdf_timeout" if status == "TIMEOUT" else "pdf_unreadable", label, "pdf")
 
                                     if status == "OK":
                                         if hits:
@@ -1146,6 +1199,10 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                     else:
                                         print(f"       [ZIP] {label} → download: OK | lezen: FAIL")
                                 else:
+                                    if is_zip and not zip_follow_nested:
+                                        skip_document("nested_zip_disabled", label, "zip")
+                                    elif not is_zip:
+                                        skip_document("unsupported_document_type", label, os.path.splitext(fname)[1].lstrip(".") or "onbekend")
                                     # we loggen non-PDF entries kort
                                     if is_zip:
                                         note = "(nested zip; genegeerd)" if not zip_follow_nested else "(nested zip; gevolgd)"
@@ -1154,6 +1211,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                     print(f"       [ZIP] {label} → {note}")
 
                             if not found_any_pdf:
+                                skip_document("zip_no_pdf", dname, "zip")
                                 print(f"     [{i}] {dname} (zip) → geen PDF’s binnen zip")
                             else:
                                 if found_keywords_overall:
@@ -1166,16 +1224,19 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                     print(f"     [{i}] {dname} (zip) → samenvatting: geen keyword hits in PDFs")
 
                         except zipfile.BadZipFile:
+                            skip_document("zip_invalid", dname, "zip")
                             print(
                                 f"     [{i}] {dname} (zip) → beschadigd of ongeldig ZIP-archief (BadZipFile)"
                             )
                         except Exception as e:
+                            skip_document("zip_download_or_processing_failed", dname, "zip", str(e))
                             print(f"     [{i}] {dname} (zip) → verwerken FAIL: {e}")
 
                         time.sleep(throttle_s)
                         continue
 
                     # --- overige bestandssoorten ---
+                    skip_document("unsupported_document_type", dname, dtype or os.path.splitext(dname)[1].lstrip(".") or "onbekend")
                     print(f"     [{i}] {dname} ({dtype or 'onbekend'}) → overgeslagen (geen pdf/zip)")
 
                 if any_keyword:
@@ -1208,12 +1269,18 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 decision = str(a.get("decision") or "").strip().upper()
                                 if decision == "GO":
                                     output_category = "GO"
+                                else:
+                                    record_skip("openai_no_go" if decision == "NO_GO" else "openai_maybe" if decision == "MAYBE" else "openai_unknown_decision",
+                                                pid, naam, org, best["name"], "pdf", str(a.get("reason_short") or decision))
                                 print(f"   → OpenAI oordeel: {a.get('decision')} | confidence: {a.get('confidence')} | {a.get('reason_short')}")
                                 if analysis_result.get("output_path"):
                                     print(f"   → OpenAI analyse opgeslagen: {analysis_result['output_path']}")
                             else:
+                                record_skip("openai_analysis_failed_or_skipped", pid, naam, org, best["name"], "pdf",
+                                            f"{analysis_result.get('status')}: {analysis_result.get('error', 'Geen geldige JSON')}")
                                 print(f"   → OpenAI analyse niet gelukt ({analysis_result.get('status')}): {analysis_result.get('error', 'geen geldige JSON teruggekregen')}")
                         else:
+                            record_skip("openai_disabled", pid, naam, org, best["name"], "pdf")
                             print("   → OpenAI-analyse staat uit. Gebruik --analyze_openai om deze leidraad te uploaden/analyseren.")
 
                         if len(leidraad_candidates) > 1:
@@ -1222,6 +1289,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 print(f"      - {cand['name']} | score: {cand['score']} | match: {', '.join(cand['title_hits'])} | pad: {cand['path']}")
                     else:
                         print("   → Keyword-hit gevonden, maar geen leidraad-kandidaat op documenttitel")
+                        record_skip("no_leidraad", pid, naam, org, documents=document_inventory)
                         publications_without_leidraad.append({
                             "publication_id": str(pid),
                             "title": naam,
@@ -1237,6 +1305,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                         for cand in supporting_doc_candidates[:5]:
                             print(f"      - {cand['name']} | match: {', '.join(cand['title_hits'])} | pad: {cand['path']}")
                 else:
+                    record_skip("no_content_keyword_match", pid, naam, org, documents=document_inventory)
                     print("   → Geen keyword-hit → leidraad-check overgeslagen")
 
                 # Sorteer pas ná de eventuele OpenAI-analyse, want dan weten we pas of iets echt GO is.
@@ -1257,9 +1326,24 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
             if not any_recent:
                 break
 
+        else:
+            record_skip("page_limit_reached", detail=f"Maximaal {max_pages} pagina's opgehaald; eventuele volgende pagina's niet gescand")
+
     finally:
         # Zorg dat het worker-process altijd netjes wordt afgesloten.
         pdf_parser.shutdown()
+        skip_report_path = os.path.join(download_dir, "overgeslagen_overzicht.json")
+        with open(skip_report_path, "w", encoding="utf-8") as f:
+            json.dump({"created_at": ams_now().isoformat(), "events": SKIP_EVENTS}, f, ensure_ascii=False, indent=2)
+
+    print("\nOVERZICHT ALLE OVERSLAANREDENEN")
+    for event in SKIP_EVENTS:
+        print(f"- {event['reason']} | ID: {event['publication_id'] or '-'} | {event['title']} | {event['document_name']} | type: {event['document_type']} | {event['detail']}")
+    print(f"- Overzicht opgeslagen: {skip_report_path}")
+
+    # Alleen resultaten van deze run: oude GO-mappen mogen niet opnieuw worden gemaild.
+    with open(os.path.join(download_dir, "current_scan_results.json"), "w", encoding="utf-8") as f:
+        json.dump(list(openai_results_by_publication.values()), f, ensure_ascii=False, indent=2)
 
     report_path = os.path.join(download_dir, "overgeslagen_zonder_leidraad.json")
     with open(report_path, "w", encoding="utf-8") as f:
