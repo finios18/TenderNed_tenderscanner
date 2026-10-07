@@ -156,7 +156,7 @@ KEYWORDS = [
     "data-engineering",
     "data-analyse",
     "data-science",
-    "busines analist",
+    "business analist",
     "business analyst",
     "proces analist",
     "procesanalist",
@@ -166,18 +166,7 @@ KEYWORDS = [
 
 # Documenttitels die waarschijnlijk de hoofdleidraad / het beschrijvend document aanduiden.
 # Matching is case-insensitive: titel/bestandsnaam wordt eerst naar lowercase gezet.
-AANBESTEDING_KEYWORDS = [
-    "bestek",
-    "inkoopdocument",
-    "inkoop document",
-    "selectiedocument",
-    "selectie document",
-    "uitnodiging tot inschrijving",
-    "tender document",
-    "offerte aanvraag",
-    "Inleiding",
-    "omschrijving",
-    "uti",
+LEIDRAAD_TITLE_TERMS = [
     "beschrijvend document",
     "leidraad",
     "inschrijfleidraad",
@@ -189,8 +178,6 @@ AANBESTEDING_KEYWORDS = [
     "offerteaanvraag",
     "offerte aanvraag"
 ]
-
-LEIDRAAD_TITLE_TERMS = AANBESTEDING_KEYWORDS
 
 # Termen die iets minder hard zijn, maar vaak wel wijzen op inhoudelijk relevante stukken.
 # Deze sturen we standaard nog niet naar OpenAI, maar we rapporteren ze wel als kandidaten.
@@ -588,7 +575,7 @@ def _norm_title(s: str) -> str:
 def leidraad_title_hits(title: str):
     """Return lijst met leidraad-termen die in de lowercased documenttitel voorkomen."""
     normalized = _norm_title(title)
-    return [term for term in AANBESTEDING_KEYWORDS if _norm_title(term) in normalized]
+    return [term for term in LEIDRAAD_TITLE_TERMS if term in normalized]
 
 def supporting_doc_title_hits(title: str):
     """Return lijst met aanvullende tender-documenttermen die in de titel voorkomen."""
@@ -618,11 +605,6 @@ def leidraad_score(title: str) -> int:
     for term, weight in weighted_terms.items():
         if term in normalized:
             score += weight
-    # Nieuwe titeltermen tellen mee, maar specifieke leidraden blijven de voorkeur houden.
-    for term in AANBESTEDING_KEYWORDS:
-        normalized_term = _norm_title(term)
-        if normalized_term not in weighted_terms and normalized_term in normalized:
-            score += 10 if normalized_term in {"inleiding", "omschrijving", "uti"} else 70
     # Vermijd dat nota's of antwoorden per ongeluk als leidraad gekozen worden.
     negative_terms = ["nota van inlichtingen", "nvi", "vragen", "antwoord", "rectificatie"]
     for term in negative_terms:
@@ -931,7 +913,6 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
     leidraad_candidates_by_publication = {}
     supporting_doc_candidates_by_publication = {}
     openai_results_by_publication = {}
-    publications_without_leidraad = []
     processed = 0
     skipped_cpv = 0
     seen = 0
@@ -1009,18 +990,11 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                 # Bewaar alleen documenten die daadwerkelijk zijn gedownload/verwerkt.
                 # Leidraad-detectie gebeurt bewust pas NA de keyword-filter.
                 downloaded_documents = []
-                document_inventory = []
 
                 for i, d in enumerate(docs, start=1):
                     dname = d.get("documentNaam") or f"doc_{i}"
                     dtype = ((d.get("typeDocument") or {}).get("code")) or ""
                     dlrel = (((d.get("links") or {}).get("download") or {}).get("href")) or ""
-                    document_inventory.append({
-                        "name": dname,
-                        "type": dtype or os.path.splitext(dname)[1].lstrip(".") or "onbekend",
-                        "source": "TenderNed",
-                        "has_download_link": bool(dlrel),
-                    })
 
 
                     if not dlrel:
@@ -1103,11 +1077,6 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 parent_label=zip_stem,
                                 throttle_s=throttle_s,
                             ):
-                                document_inventory.append({
-                                    "name": label,
-                                    "type": "pdf" if is_pdf else "zip" if is_zip else os.path.splitext(fname)[1].lstrip(".") or "onbekend",
-                                    "source": f"zip:{dname}",
-                                })
                                 if is_pdf:
                                     found_any_pdf = True
                                     save_as = os.path.join(
@@ -1222,14 +1191,6 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 print(f"      - {cand['name']} | score: {cand['score']} | match: {', '.join(cand['title_hits'])} | pad: {cand['path']}")
                     else:
                         print("   → Keyword-hit gevonden, maar geen leidraad-kandidaat op documenttitel")
-                        publications_without_leidraad.append({
-                            "publication_id": str(pid),
-                            "title": naam,
-                            "organisation": org,
-                            "publication_date": str(pdt or ""),
-                            "reason": "Geen leidraad-kandidaat in gedownloade PDF-documenten na keyword-hit; AI-analyse overgeslagen",
-                            "documents": document_inventory,
-                        })
 
                     if supporting_doc_candidates:
                         supporting_doc_candidates_by_publication[pid] = supporting_doc_candidates
@@ -1260,21 +1221,6 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
     finally:
         # Zorg dat het worker-process altijd netjes wordt afgesloten.
         pdf_parser.shutdown()
-
-    report_path = os.path.join(download_dir, "overgeslagen_zonder_leidraad.json")
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump({"created_at": ams_now().isoformat(), "publications": publications_without_leidraad},
-                  f, ensure_ascii=False, indent=2)
-
-    print("\nOVERGESLAGEN: GEEN LEIDRAAD GEVONDEN NA KEYWORD-HIT")
-    print(f"- Aantal aanbestedingen: {len(publications_without_leidraad)}")
-    for publication in publications_without_leidraad:
-        print(f"- ID {publication['publication_id']}: {publication['title']} — {publication['organisation']}")
-        for document in publication["documents"]:
-            print(f"    - {document['name']} | type: {document['type']} | bron: {document['source']}")
-        if not publication["documents"]:
-            print("    - Geen documenten beschikbaar")
-    print(f"- Overzicht opgeslagen: {report_path}")
 
     # Samenvatting
     print("\nSAMENVATTING")

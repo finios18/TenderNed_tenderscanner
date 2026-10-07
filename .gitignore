@@ -4,3 +4,5 @@ tender_scan_with_openai_leidraad_go_overzicht_3.py
 ondersteunend_doc.txt
 local_openai_test_results/
 aanbestedingen_glenn/
+recent_downloads
+__pycache__/

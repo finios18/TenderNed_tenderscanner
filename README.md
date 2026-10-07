@@ -215,6 +215,24 @@ KEYWORDS
 
 ## Tender Document Detection
 
+The current entry point is `tender_scan.py`. Procurement document titles are
+matched case-insensitively against `AANBESTEDING_KEYWORDS`, including bestek,
+inkoopdocument, selectiedocument, uitnodiging tot inschrijving, tender document,
+inleiding, omschrijving and uti. Existing lead-document terms remain supported.
+Specific lead-document titles rank above the generic terms inleiding, omschrijving
+and uti. These title keywords are separate from the IT/data content keywords.
+
+After a content keyword hit, publications without a detected lead-document PDF
+are listed in the terminal and saved to
+`<download_dir>/overgeslagen_zonder_leidraad.json`. The report contains publication
+ID, title, organisation, publication date and document names/types, including
+unsupported documents, documents without download links and encountered ZIP
+entries. These publications receive no AI assessment. Publications skipped by
+CPV or content keyword filters are outside this report. The JSON describes the
+latest completed scan and is overwritten on the next completed scan, including
+when no publications were skipped. It is also included in the workflow's
+download artifact.
+
 After a tender passes:
 
 1. Publication filter
