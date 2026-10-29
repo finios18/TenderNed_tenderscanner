@@ -207,7 +207,9 @@ AANBESTEDING_KEYWORDS = [
     "aanbestedingsleidraad",
     "aanbestedings leidraad",
     "offerteaanvraag",
-    "offerte aanvraag"
+    "offerte aanvraag",
+    "call for tender",
+    "bd"
 ]
 
 LEIDRAAD_TITLE_TERMS = AANBESTEDING_KEYWORDS
