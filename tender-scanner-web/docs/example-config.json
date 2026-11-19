@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "customer_id": "33333333-3333-4333-8333-333333333333",
+  "company": {
+    "company_name": "Fictieve Data BV",
+    "name": "Fictieve Data BV",
+    "website": "https://example.com",
+    "kvk_number": "",
+    "contact_person": "Fictieve Contactpersoon",
+    "contact_email": "contact@example.com",
+    "phone_number": "",
+    "city": "Utrecht",
+    "company_size": "11–50",
+    "description": "Fictief bedrijf voor data-engineering en tijdelijke inzet van analisten."
+  },
+  "contact": {
+    "email": "selectie@example.com",
+    "person": "Fictieve Contactpersoon"
+  },
+  "business_context": {
+    "description": "Fictief bedrijf voor data-engineering en tijdelijke inzet van analisten.",
+    "services": "Detachering en data-advies",
+    "specializations": "Python, BI en data engineering",
+    "sectors": "Gemeenten en onderwijs",
+    "desired_contracts": "Raamovereenkomsten voor personele inzet",
+    "excluded_services": "Hardware en softwarelicenties",
+    "competitive_advantages": "Ervaring met gemeentelijke datavraagstukken"
+  },
+  "scanner_config": {
+    "cpv_whitelist": [
+      "72000000",
+      "79620000"
+    ],
+    "cpv_details": [
+      {
+        "code": "72000000-5",
+        "description": "IT-diensten: adviezen, softwareontwikkeling, internet en ondersteuning",
+        "include_descendants": false,
+        "original_description": "IT-diensten"
+      },
+      {
+        "code": "79620000-6",
+        "description": "Diensten voor de terbeschikkingstelling van personeel, met inbegrip van tijdelijk personeel",
+        "include_descendants": false,
+        "original_description": "Terbeschikkingstelling van personeel"
+      }
+    ],
+    "cpv_notes": "Graag ook brede inhuur meenemen bij de inrichting.",
+    "keywords": [
+      "Data engineering",
+      "Python"
+    ],
+    "negative_keywords": [
+      "Hardwarelevering"
+    ],
+    "email_frequency_days": 3,
+    "notification_email": "selectie@example.com",
+    "email_notes": "Fictief voorbeeld, dit adres ontvangt geen rapporten.",
+    "geographic_preferences": "Midden-Nederland",
+    "minimum_contract_value": null,
+    "maximum_contract_value": 80000000,
+    "preferred_contract_types": "Raamovereenkomst, DAS",
+    "preferred_buyers": "Gemeenten",
+    "certifications": "Alleen fictieve voorbeeldgegevens",
+    "additional_requirements": "Geen hardwarelevering",
+    "cpv_dataset": {
+      "classification": "CPV 2008",
+      "source_sha256": "307d7f4fe6ac5b19e8a558ed8d9bc4f4591b96b7a09fb79b23d2ecb39d4a8608"
+    }
+  },
+  "historical_tenders": {
+    "participated": [
+      {
+        "publication_id": "123456",
+        "original_input": "123456",
+        "notes": "Fictieve voorbeeld-ID; geen claim over de werkelijke publicatie."
+      }
+    ],
+    "interesting": [],
+    "not_interesting": []
+  },
+  "subscription": {
+    "status": "submitted",
+    "trial_started_at": null,
+    "trial_ends_at": null,
+    "activated_at": null
+  },
+  "onboarding_completed": true,
+  "updated_at": "2026-11-19T12:00:00Z"
+}

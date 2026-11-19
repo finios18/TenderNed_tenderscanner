@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.next-browser-tests/
+out/
+.env*
+!.env.example
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.pnpm-store/
+.supabase/
