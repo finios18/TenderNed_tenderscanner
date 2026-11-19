@@ -8,7 +8,8 @@ Automated TenderNed scanner that searches recent Dutch public tenders, filters t
 - Filters tenders using configurable CPV whitelists
 - Supports:
   - PDF documents
-  - ZIP archives containing PDFs
+  - DOCX documents (paragraphs, tables, headers and footers)
+  - ZIP archives containing PDFs and DOCX documents
   - Nested ZIP archives (optional)
 - Searches documents for predefined keywords such as:
   - Data Engineer
@@ -66,24 +67,39 @@ git clone https://github.com/<your-username>/<repo-name>.git
 cd <repo-name>
 ```
 
-### Create virtual environment
+### Install and synchronize with uv
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, then
+run the following from the repository root:
+
+```sh
+uv sync --locked
 ```
 
-Windows:
+uv manages Python 3.11 (pinned in `.python-version`) and the local `.venv`.
+Manual activation is unnecessary: execute commands with `uv run --locked`.
+Dependencies are declared in `pyproject.toml`; `uv.lock` records exact resolved
+versions for reproducible installations locally and in GitHub Actions. Commit
+both files, but do not commit `.venv` or the uv cache. `requirements.txt` is no
+longer maintained or required.
 
-```bash
-.venv\Scripts\activate
+```sh
+uv run --locked python -m unittest discover -s tests -v
+uv add package-name
+uv remove package-name
+uv lock --upgrade
+uv sync --locked
 ```
 
-### Install dependencies
+When an external tool specifically requires pip requirements, generate an export
+using `uv export --format requirements-txt --output-file requirements.txt` rather
+than maintaining a second dependency list by hand.
 
-```bash
-pip install requests python-dateutil PyPDF2 pdfminer.six openai
-```
+### Project entry points
+
+- `tender_scan.py`: current scanner used by the workflow, including DOCX support,
+  central document-title priorities, skip reports and current-run AI results.
+- `go_mail_report.py`: generates the readable GO mail attachment.
 
 ---
 
@@ -114,31 +130,31 @@ export OPENAI_MODEL=gpt-5.4-mini
 ### Basic scan
 
 ```bash
-python tender_scan_with_filters_4.py
+uv run --locked python tender_scan.py
 ```
 
 ### Scan last 7 days
 
 ```bash
-python tender_scan_with_filters_4.py --days 7
+uv run --locked python tender_scan.py --days 7
 ```
 
 ### Enable OpenAI evaluation
 
 ```bash
-python tender_scan_with_filters_4.py --analyze_openai
+uv run --locked python tender_scan.py --analyze_openai
 ```
 
 ### Follow nested ZIP archives
 
 ```bash
-python tender_scan_with_filters_4.py --zip_follow_nested
+uv run --locked python tender_scan.py --zip_follow_nested
 ```
 
 ### Full example
 
 ```bash
-python tender_scan_with_filters_4.py \
+uv run --locked python tender_scan.py \
     --days 7 \
     --pages 20 \
     --analyze_openai \
@@ -233,11 +249,24 @@ KEYWORDS
 The current entry point is `tender_scan.py`. Procurement document titles are
 matched case-insensitively against `AANBESTEDING_KEYWORDS`, including bestek,
 inkoopdocument, selectiedocument, uitnodiging tot inschrijving, tender document,
-inleiding, omschrijving and uti. Existing lead-document terms remain supported.
-Specific lead-document titles rank above the generic terms inleiding, omschrijving
-and uti. These title keywords are separate from the IT/data content keywords.
+inleiding, omschrijving, uti, toelatingsdocument, aanbesteding and al.
+This is the single ordered list used for lead-document recognition and priority:
+the first matching term determines the score. Scores are not added together and
+there are no negative terms or penalties. Move a term higher in the list to give
+it higher priority. `al` is last, has score 1 and matches a standalone abbreviation
+(such as `AL.pdf`), not a fragment of a word such as `algemeen`. Any other matching
+term ranks above an AL-only document. These title keywords are separate from the
+IT/data content keywords.
 
-After a content keyword hit, publications without a detected lead-document PDF
+Both directly downloaded PDFs/DOCX files and those found inside ZIP archives
+participate in content keyword matching and lead-document selection. DOCX text
+is read using Python's standard library, including paragraphs, tables, headers
+and footers. No extra dependency is needed. The same parser-worker timeout is
+used for both formats. For an AI assessment, PDFs are uploaded as before; DOCX
+content is sent as extracted text. Images and visual layout inside DOCX are not
+included in the assessment. Legacy `.doc` files are not supported.
+
+After a content keyword hit, publications without a detected lead-document PDF/DOCX
 are listed in the terminal and saved to
 `<download_dir>/overgeslagen_zonder_leidraad.json`. The report contains publication
 ID, title, organisation, publication date and document names/types, including

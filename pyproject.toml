@@ -1,0 +1,18 @@
+[project]
+name = "tenderscan-hob"
+version = "0.1.0"
+description = "TenderNed scanner voor data-, IT- en detacheringsaanbestedingen"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "requests",
+    "python-dateutil",
+    "urllib3",
+    "PyPDF2",
+    "pdfminer.six",
+    "openai",
+    "tzdata; sys_platform == 'win32'",
+]
+
+[tool.uv]
+package = false

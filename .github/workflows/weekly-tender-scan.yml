@@ -14,21 +14,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9
         with:
+          version: "0.10.3"
           python-version: "3.11"
+          enable-cache: true
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install requests python-dateutil PyPDF2 pdfminer.six openai
+          uv sync --locked
+
+      - name: Run offline tests
+        run: uv run --locked python -m unittest discover -s tests -v
 
       - name: Run tender scan
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python tender_scan.py \
+          uv run --locked python tender_scan.py \
             --days 8 \
             --pages 1000 \
             --download_dir recent_downloads \
@@ -37,7 +41,7 @@ jobs:
       - name: Create mail summary
         id: mail_summary
         run: |
-          python go_mail_report.py \
+          uv run --locked python go_mail_report.py \
             --results recent_downloads/current_scan_results.json \
             --output_dir recent_downloads \
             --run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

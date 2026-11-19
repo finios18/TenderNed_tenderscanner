@@ -14,6 +14,8 @@ import requests
 import zipfile
 import json
 import shutil
+import re
+import xml.etree.ElementTree as ET
 
 # Robustness / timeboxing
 import multiprocessing as mp
@@ -185,8 +187,19 @@ KEYWORDS = [
 ]
 
 # Documenttitels die waarschijnlijk de hoofdleidraad / het beschrijvend document aanduiden.
-# Matching is case-insensitive: titel/bestandsnaam wordt eerst naar lowercase gezet.
+# Volgorde bepaalt prioriteit: eerste match wint, zonder optellen of minpunten.
 AANBESTEDING_KEYWORDS = [
+    "aanbestedingsleidraad",
+    "aanbestedings leidraad",
+    "inschrijfleidraad",
+    "inschrijf leidraad",
+    "leidraad",
+    "aanbestedingsdocument",
+    "aanbestedings document",
+    "beschrijvend document",
+    "offerteaanvraag",
+    "offerte aanvraag",
+    "toelatingsdocument",
     "bestek",
     "inkoopdocument",
     "inkoop document",
@@ -194,25 +207,14 @@ AANBESTEDING_KEYWORDS = [
     "selectie document",
     "uitnodiging tot inschrijving",
     "tender document",
-    "offerte aanvraag",
-    "Inleiding",
+    "aanbesteding",
+    "inleiding",
     "omschrijving",
     "uti",
-    "beschrijvend document",
-    "leidraad",
-    "inschrijfleidraad",
-    "inschrijf leidraad",
-    "aanbestedingsdocument",
-    "aanbestedings document",
-    "aanbestedingsleidraad",
-    "aanbestedings leidraad",
-    "offerteaanvraag",
-    "offerte aanvraag",
     "call for tender",
-    "bd"
+    "bd",
+    "al",
 ]
-
-LEIDRAAD_TITLE_TERMS = AANBESTEDING_KEYWORDS
 
 # Termen die iets minder hard zijn, maar vaak wel wijzen op inhoudelijk relevante stukken.
 # Deze sturen we standaard nog niet naar OpenAI, maar we rapporteren ze wel als kandidaten.
@@ -343,16 +345,16 @@ def _extract_json_object(text: str):
 def analyze_leidraad_with_openai(pdf_path: str, publication_id: str, title: str, organisation: str,
                                   publication_date: str, cpv_codes, model: str = OPENAI_MODEL_DEFAULT,
                                   output_dir: str = None):
-    """Upload één leidraad-PDF naar OpenAI en vraag een strenge JSON-analyse terug.
+    """Analyseer één PDF-leidraad of de geëxtraheerde tekst van een DOCX-leidraad.
 
     Vereisten:
-    - pip install openai
+    - uv sync --locked
     - env var OPENAI_API_KEY moet gezet zijn
 
     Return dict met status, eventueel analysis/error/output_path.
     """
     if not pdf_path or not os.path.exists(pdf_path):
-        return {"status": "SKIPPED", "error": f"PDF bestaat niet: {pdf_path}"}
+        return {"status": "SKIPPED", "error": f"Document bestaat niet: {pdf_path}"}
 
     if not os.environ.get("OPENAI_API_KEY"):
         return {"status": "SKIPPED", "error": "OPENAI_API_KEY ontbreekt; OpenAI-analyse overgeslagen"}
@@ -366,17 +368,25 @@ def analyze_leidraad_with_openai(pdf_path: str, publication_id: str, title: str,
     prompt = build_tender_analysis_prompt(publication_id, title, organisation, publication_date, cpv_codes)
 
     try:
-        with open(pdf_path, "rb") as f:
-            uploaded = client.files.create(file=f, purpose="assistants")
+        content = [{"type": "input_text", "text": prompt}]
+        file_id = None
+        if pdf_path.lower().endswith(".docx"):
+            with open(pdf_path, "rb") as f:
+                ok, text = try_extract_docx_text(f.read())
+            if not ok:
+                raise ValueError("DOCX bevat geen leesbare tekst")
+            content.append({"type": "input_text", "text": "Inhoud van de DOCX-leidraad:\n" + text})
+        else:
+            with open(pdf_path, "rb") as f:
+                uploaded = client.files.create(file=f, purpose="assistants")
+            file_id = uploaded.id
+            content.append({"type": "input_file", "file_id": file_id})
 
         response = client.responses.create(
             model=model,
             input=[{
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_file", "file_id": uploaded.id},
-                ],
+                "content": content,
             }],
         )
 
@@ -389,7 +399,7 @@ def analyze_leidraad_with_openai(pdf_path: str, publication_id: str, title: str,
             "organisation": organisation,
             "leidraad_path": pdf_path,
             "model": model,
-            "file_id": uploaded.id,
+            "file_id": file_id,
             "analysis": parsed,
             "raw_output": raw_text,
         }
@@ -614,7 +624,8 @@ def _norm_title(s: str) -> str:
 def leidraad_title_hits(title: str):
     """Return lijst met leidraad-termen die in de lowercased documenttitel voorkomen."""
     normalized = _norm_title(title)
-    return [term for term in AANBESTEDING_KEYWORDS if _norm_title(term) in normalized]
+    return [term for term in AANBESTEDING_KEYWORDS
+            if (bool(re.search(r"\bal\b", normalized)) if term == "al" else _norm_title(term) in normalized)]
 
 def supporting_doc_title_hits(title: str):
     """Return lijst met aanvullende tender-documenttermen die in de titel voorkomen."""
@@ -625,36 +636,10 @@ def is_probable_leidraad_title(title: str) -> bool:
     return bool(leidraad_title_hits(title))
 
 def leidraad_score(title: str) -> int:
-    """Score om de beste leidraad-kandidaat te kiezen als er meerdere matches zijn."""
-    normalized = _norm_title(title)
-    score = 0
-    # Specifieke termen zijn waardevoller dan generieke 'leidraad'.
-    weighted_terms = {
-        "aanbestedingsleidraad": 100,
-        "aanbestedings leidraad": 100,
-        "inschrijfleidraad": 95,
-        "inschrijf leidraad": 95,
-        "leidraad": 95,
-        "aanbestedingsdocument": 90,
-        "aanbestedings document": 90,
-        "beschrijvend document": 85,
-        "offerteaanvraag": 80,
-        "offerte aanvraag": 80,
-    }
-    for term, weight in weighted_terms.items():
-        if term in normalized:
-            score += weight
-    # Nieuwe titeltermen tellen mee, maar specifieke leidraden blijven de voorkeur houden.
-    for term in AANBESTEDING_KEYWORDS:
-        normalized_term = _norm_title(term)
-        if normalized_term not in weighted_terms and normalized_term in normalized:
-            score += 10 if normalized_term in {"inleiding", "omschrijving", "uti"} else 70
-    # Vermijd dat nota's of antwoorden per ongeluk als leidraad gekozen worden.
-    negative_terms = ["nota van inlichtingen", "nvi", "vragen", "antwoord", "rectificatie"]
-    for term in negative_terms:
-        if term in normalized:
-            score -= 60
-    return score
+    """Prioriteit uitsluitend uit de centrale lijst; AL heeft de laagste score (1)."""
+    hits = leidraad_title_hits(title)
+    return next((len(AANBESTEDING_KEYWORDS) - index
+                 for index, term in enumerate(AANBESTEDING_KEYWORDS) if term in hits), 0)
 
 
 def find_leidraad_candidates(downloaded_documents):
@@ -696,6 +681,32 @@ def find_leidraad_candidates(downloaded_documents):
     return candidates, supporting
 
 # ==== Helpers: PDF / keywords ====
+def try_extract_docx_text(blob: bytes):
+    """Lees alinea's, tabellen en kop-/voetteksten uit DOCX met de standaardbibliotheek."""
+    try:
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        chunks = []
+        with zipfile.ZipFile(BytesIO(blob)) as archive:
+            parts = ["word/document.xml"] + sorted(name for name in archive.namelist()
+                       if re.fullmatch(r"word/(?:header|footer)\d+\.xml", name))
+            for part in parts:
+                root = ET.fromstring(archive.read(part))
+                for paragraph in root.findall(".//w:p", namespace):
+                    chunks.append("".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)))
+        text = "\n".join(chunks)
+        return bool(text.strip()), text
+    except Exception:
+        return False, ""
+
+
+def supported_document_type(dtype: str, name: str) -> str:
+    extension = os.path.splitext(name)[1].lower().lstrip(".")
+    if extension in {"pdf", "docx"}:
+        return extension
+    code = (dtype or "").lower()
+    return code if code in {"pdf", "docx"} else ""
+
+
 def try_extract_pdf_text(blob: bytes):
     # 1. Probeer eerst PyPDF2 (sneller / simpeler)
     try:
@@ -723,8 +734,8 @@ def try_extract_pdf_text(blob: bytes):
 
 
 def _pdf_worker_loop(in_q: mp.Queue, out_q: mp.Queue):
-    """Worker-process die seriëel PDF-bytes ontvangt en text extractie uitvoert.
-    We houden dit proces persistent om overhead laag te houden bij duizenden PDFs.
+    """Worker-process die seriëel PDF- of DOCX-bytes ontvangt en tekst extraheert.
+    We houden dit proces persistent om overhead laag te houden.
     """
     while True:
         item = in_q.get()
@@ -732,7 +743,8 @@ def _pdf_worker_loop(in_q: mp.Queue, out_q: mp.Queue):
             break
         job_id, label, pdf_bytes = item
         try:
-            ok, text = try_extract_pdf_text(pdf_bytes)
+            ok, text = (try_extract_docx_text(pdf_bytes) if pdf_bytes.startswith(b"PK")
+                        else try_extract_pdf_text(pdf_bytes))
             out_q.put((job_id, ok, text, False, label))
         except Exception:
             out_q.put((job_id, False, "", False, label))
@@ -795,7 +807,7 @@ class PdfParseSupervisor:
             return ok, text, False
         except Exception:
             # timeout of queue error -> worker hangt
-            log(f"[PDF TIMEOUT] >{self.timeout_s}s tijdens parsen → worker herstart. ({label})")
+            log(f"[DOCUMENT TIMEOUT] >{self.timeout_s}s tijdens parsen → worker herstart. ({label})")
             self._kill_worker()
             self._start_worker()
             return False, "", True
@@ -818,7 +830,7 @@ def looks_like_zip(dtype: str, name: str) -> bool:
 def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent_label: str, throttle_s: float, on_skip=None):
     """
     Leest ZIP uit bytes en yield tuples van:
-    (entry_label, entry_filename, entry_bytes, entry_is_pdf, entry_is_zip)
+    (entry_label, entry_filename, entry_bytes, entry_is_document, entry_is_zip)
 
     - Slaat directories en verborgen/macOS troep over.
     - Volgt nested zip enkel als follow_nested=True.
@@ -861,10 +873,10 @@ def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent
             continue
 
         fname = os.path.basename(zi.filename)
-        is_pdf = fname.lower().endswith(".pdf")
+        is_document = bool(supported_document_type("", fname))
         is_zip = fname.lower().endswith(".zip")
         label  = f"{parent_label}/{fname}" if parent_label else fname
-        yield (label, fname, data, is_pdf, is_zip)
+        yield (label, fname, data, is_document, is_zip)
 
         time.sleep(throttle_s)
 
@@ -873,8 +885,8 @@ def safe_zip_iter(zip_blob: bytes, follow_nested: bool, base_outdir: str, parent
             for nested in safe_zip_iter(data, follow_nested, base_outdir, label, throttle_s, on_skip=on_skip):
                 yield nested
 
-def process_pdf_blob(pdf_bytes: bytes, save_as_path: str, pdf_parser: PdfParseSupervisor, label: str = ""):
-    """Slaat PDF op en zoekt keywords.
+def process_document_blob(pdf_bytes: bytes, save_as_path: str, pdf_parser: PdfParseSupervisor, label: str = ""):
+    """Slaat een PDF/DOCX op en zoekt keywords via de parser-worker.
 
     Robuustheid:
     - Parsing is timeboxed via PdfParseSupervisor (max 60s).
@@ -950,7 +962,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
     Robuustheid:
     - Netwerk calls zijn timeboxed (max ~60s per call); errors worden gelogd en de scan gaat door.
-    - PDF parsing is timeboxed (max 60s per PDF) via een persistent worker-process.
+    - PDF/DOCX parsing is timeboxed (max 60s per document) via een persistent worker-process.
     - Extra timing logs om te zien waar het 'hangt'.
     """
 
@@ -1039,7 +1051,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                     log(f"[SLOW DOCS] {pid} {_fmt_dur(dur_docs)}")
 
                 print(
-                    f"   → CPV match gevonden → documenten lezen (PDF + PDF’s in ZIP). Aantal documenten: {len(docs)}"
+                    f"   → CPV match gevonden → documenten lezen (PDF/DOCX, ook in ZIP). Aantal documenten: {len(docs)}"
                 )
                 outdir = os.path.join(download_dir, str(pid))
                 os.makedirs(outdir, exist_ok=True)
@@ -1077,9 +1089,11 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
                     url = dlrel if dlrel.startswith("http") else WEB_BASE + dlrel
 
-                    # --- PDF direct ---
-                    if (dtype and dtype.lower() == "pdf") or dname.lower().endswith(".pdf"):
-                        fn = dname if dname.lower().endswith(".pdf") else (dname + ".pdf")
+                    # --- PDF / DOCX direct ---
+                    document_type = supported_document_type(dtype, dname)
+                    if document_type:
+                        extension = "." + document_type
+                        fn = dname if dname.lower().endswith(extension) else dname + extension
                         fpath = os.path.join(outdir, fn)
                         try:
                             t_dl = time.monotonic()
@@ -1088,17 +1102,17 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             if dur_dl >= SLOW_STEP_S and VERBOSE_STEPS:
                                 log(f"[SLOW DL] {pid} {_fmt_dur(dur_dl)} {dname}")
 
-                            status, hits = process_pdf_blob(blob, fpath, pdf_parser, label=f"{pid}/{fn}")
+                            status, hits = process_document_blob(blob, fpath, pdf_parser, label=f"{pid}/{fn}")
                             downloaded_documents.append({
                                 "title": dname,
                                 "filename": fn,
                                 "path": fpath,
-                                "source": "direct_pdf",
+                                "source": f"direct_{document_type}",
                                 "read_status": status,
                                 "keyword_hits": hits,
                             })
                             if status != "OK":
-                                skip_document("pdf_timeout" if status == "TIMEOUT" else "pdf_unreadable", dname, "pdf")
+                                skip_document(f"{document_type}_timeout" if status == "TIMEOUT" else f"{document_type}_unreadable", dname, document_type)
 
                             if status == "OK":
                                 if hits:
@@ -1116,8 +1130,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                 print(f"     [{i}] {fn} → download: OK | lezen: FAIL")
 
                         except Exception as e:
-                            skip_document("pdf_download_or_processing_failed", dname, "pdf", str(e))
-                            print(f"     [{i}] {dname} (pdf) → download/lezen FAIL: {e}")
+                            skip_document(f"{document_type}_download_or_processing_failed", dname, document_type, str(e))
+                            print(f"     [{i}] {dname} ({document_type}) → download/lezen FAIL: {e}")
 
                         time.sleep(throttle_s)
                         continue
@@ -1145,10 +1159,10 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             zip_outdir = os.path.join(outdir, zip_stem)
                             os.makedirs(zip_outdir, exist_ok=True)
 
-                            found_any_pdf = False
+                            found_any_document = False
                             found_keywords_overall = []
 
-                            for (label, fname, data, is_pdf, is_zip) in safe_zip_iter(
+                            for (label, fname, data, is_document, is_zip) in safe_zip_iter(
                                 blob,
                                 follow_nested=zip_follow_nested,
                                 base_outdir=zip_outdir,
@@ -1158,17 +1172,18 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             ):
                                 document_inventory.append({
                                     "name": label,
-                                    "type": "pdf" if is_pdf else "zip" if is_zip else os.path.splitext(fname)[1].lstrip(".") or "onbekend",
+                                    "type": os.path.splitext(fname)[1].lower().lstrip(".") or "onbekend",
                                     "source": f"zip:{dname}",
                                 })
-                                if is_pdf:
-                                    found_any_pdf = True
+                                if is_document:
+                                    found_any_document = True
+                                    document_type = supported_document_type("", fname)
                                     save_as = os.path.join(
                                         zip_outdir,
-                                        fname if fname.lower().endswith(".pdf") else (fname + ".pdf"),
+                                        fname,
                                     )
 
-                                    status, hits = process_pdf_blob(
+                                    status, hits = process_document_blob(
                                         data,
                                         save_as,
                                         pdf_parser,
@@ -1183,7 +1198,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                         "keyword_hits": hits,
                                     })
                                     if status != "OK":
-                                        skip_document("pdf_timeout" if status == "TIMEOUT" else "pdf_unreadable", label, "pdf")
+                                        skip_document(f"{document_type}_timeout" if status == "TIMEOUT" else f"{document_type}_unreadable", label, document_type)
 
                                     if status == "OK":
                                         if hits:
@@ -1209,12 +1224,12 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                     if is_zip:
                                         note = "(nested zip; genegeerd)" if not zip_follow_nested else "(nested zip; gevolgd)"
                                     else:
-                                        note = "(geen pdf)"
+                                        note = "(geen pdf/docx)"
                                     print(f"       [ZIP] {label} → {note}")
 
-                            if not found_any_pdf:
-                                skip_document("zip_no_pdf", dname, "zip")
-                                print(f"     [{i}] {dname} (zip) → geen PDF’s binnen zip")
+                            if not found_any_document:
+                                skip_document("zip_no_supported_documents", dname, "zip")
+                                print(f"     [{i}] {dname} (zip) → geen PDF/DOCX binnen zip")
                             else:
                                 if found_keywords_overall:
                                     # toon unieke keywords
@@ -1223,7 +1238,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                         f"     [{i}] {dname} (zip) → samenvatting: KEYWORDS in zip: {', '.join(uniq)}"
                                     )
                                 else:
-                                    print(f"     [{i}] {dname} (zip) → samenvatting: geen keyword hits in PDFs")
+                                    print(f"     [{i}] {dname} (zip) → samenvatting: geen keyword hits in PDF/DOCX")
 
                         except zipfile.BadZipFile:
                             skip_document("zip_invalid", dname, "zip")
@@ -1239,7 +1254,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
                     # --- overige bestandssoorten ---
                     skip_document("unsupported_document_type", dname, dtype or os.path.splitext(dname)[1].lstrip(".") or "onbekend")
-                    print(f"     [{i}] {dname} ({dtype or 'onbekend'}) → overgeslagen (geen pdf/zip)")
+                    print(f"     [{i}] {dname} ({dtype or 'onbekend'}) → overgeslagen (geen pdf/docx/zip)")
 
                 if any_keyword:
                     matched_publications[pid] = naam
@@ -1273,16 +1288,16 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                                     output_category = "GO"
                                 else:
                                     record_skip("openai_no_go" if decision == "NO_GO" else "openai_maybe" if decision == "MAYBE" else "openai_unknown_decision",
-                                                pid, naam, org, best["name"], "pdf", str(a.get("reason_short") or decision))
+                                                pid, naam, org, best["name"], supported_document_type("", best["path"]), str(a.get("reason_short") or decision))
                                 print(f"   → OpenAI oordeel: {a.get('decision')} | confidence: {a.get('confidence')} | {a.get('reason_short')}")
                                 if analysis_result.get("output_path"):
                                     print(f"   → OpenAI analyse opgeslagen: {analysis_result['output_path']}")
                             else:
-                                record_skip("openai_analysis_failed_or_skipped", pid, naam, org, best["name"], "pdf",
+                                record_skip("openai_analysis_failed_or_skipped", pid, naam, org, best["name"], supported_document_type("", best["path"]),
                                             f"{analysis_result.get('status')}: {analysis_result.get('error', 'Geen geldige JSON')}")
                                 print(f"   → OpenAI analyse niet gelukt ({analysis_result.get('status')}): {analysis_result.get('error', 'geen geldige JSON teruggekregen')}")
                         else:
-                            record_skip("openai_disabled", pid, naam, org, best["name"], "pdf")
+                            record_skip("openai_disabled", pid, naam, org, best["name"], supported_document_type("", best["path"]))
                             print("   → OpenAI-analyse staat uit. Gebruik --analyze_openai om deze leidraad te uploaden/analyseren.")
 
                         if len(leidraad_candidates) > 1:
@@ -1297,7 +1312,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                             "title": naam,
                             "organisation": org,
                             "publication_date": str(pdt or ""),
-                            "reason": "Geen leidraad-kandidaat in gedownloade PDF-documenten na keyword-hit; AI-analyse overgeslagen",
+                            "reason": "Geen leidraad-kandidaat in gedownloade PDF/DOCX-documenten na keyword-hit; AI-analyse overgeslagen",
                             "documents": document_inventory,
                         })
 
@@ -1430,7 +1445,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Scan laatste N dagen; CPV uit list+detail; lees PDF's én PDF’s in ZIP; zoek keywords; optioneel OpenAI-analyse op leidraad."
+        description="Scan laatste N dagen; CPV uit list+detail; lees PDF/DOCX, ook in ZIP; zoek keywords; optioneel OpenAI-analyse op leidraad."
     )
     ap.add_argument("--days", type=int, default=DAYS_BACK_DEFAULT, help="Aantal dagen terug (default 2).")
     ap.add_argument("--pages", type=int, default=10, help="Max # lijstpagina’s (x50).")

@@ -6,3 +6,5 @@ local_openai_test_results/
 aanbestedingen_glenn/
 recent_downloads
 __pycache__/
+.venv/
+.uv-cache/
