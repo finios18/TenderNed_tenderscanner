@@ -38,8 +38,10 @@ website vereist geen uv; uv blijft voor de bestaande Python-scanner.
    eerste registratie. De migratie maakt zeven tabellen, RLS, RPC's en een
    registratie-trigger aan. Maak in een bestaand project vooraf een back-up.
    Voer daarna ook `202611190002_cpv_catalog.sql` en
-   `202611190003_cpv_selection.sql` uit, in die volgorde. Heb je de eerste
-   migratie al uitgevoerd? Voer dan alleen deze twee nieuwe bestanden uit.
+   `202611190003_cpv_selection.sql` en `202611230001_simplify_profile.sql` uit,
+   in die volgorde. Voer in een bestaand project alleen de nog niet toegepaste migraties uit.
+   De laatste migratie verwijdert de vervallen profielvelden en categorieën;
+   publiceer aansluitend de bijbehorende websitecode.
    [CPV-upgrade en behoud van bestaande gegevens](docs/cpv.md).
 3. Vul in `.env.local`:
    - `NEXT_PUBLIC_SUPABASE_URL`: de project-URL.
@@ -86,9 +88,9 @@ De geautomatiseerde PostgreSQL-tests gebruiken PGlite en vereisen geen Docker.
   45 divisies, uitklapbare hiërarchie, zoeken en paginering.
 - CPV-selecties met expliciete keuze voor alleen de code of inclusief alle
   onderliggende codes; afzonderlijke CPV-opmerkingen.
-- Positieve en negatieve keywords toevoegen, wijzigen en verwijderen.
-- Bulkimport van publicatie-ID's/URL's, deduplicatie per categorie, originele
-  invoer en optionele toelichting. Historische voorbeelden worden niet opgehaald.
+- Eén lijst met gewenste keywords toevoegen, wijzigen en verwijderen.
+- Bulkimport van publicatie-ID's/URL's van eerdere deelnames, deduplicatie,
+  originele invoer en optionele toelichting. Historische voorbeelden worden niet opgehaald.
 - Optionele bedragen zijn `null`, niet nul, als ze leeg worden gelaten.
 - Dashboard met volledig profiel, bewerken, e-mailvoorkeuren, status en datums.
 - Eigen gegevensdownload en database-export voor de beheerder.
@@ -113,7 +115,7 @@ hiërarchie](docs/cpv.md). Voor offline verificatie van de generatie:
 uv run --no-project --python 3.11 scripts/import-cpv.py --check
 ```
 
-De export is nu versie 2. Een exacte selectie exporteert één basiscode; een
+De export is nu versie 3. Een exacte selectie exporteert één basiscode; een
 selectie inclusief onderliggende codes exporteert alle betreffende basiscodes
 expliciet, zodat de bestaande scanner ze exact kan matchen.
 

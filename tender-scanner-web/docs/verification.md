@@ -83,7 +83,7 @@ zijn pas te bevestigen na onderstaande inrichting en handmatige test.
    mag nooit A aanpassen of B activeren. `admin_export_config` en
    `workspace_for_company` mogen niet uitvoerbaar zijn met A/B/anon.
 6. Exporteer A als beheerder via SQL Editor. Valideer dat het resultaat gewone
-   JSON met schema_version 2 is en dat B's gegevens er niet in staan.
+   JSON met schema_version 3 is en dat B's gegevens er niet in staan.
 7. Activeer A met begin/einddatum. Controleer de dashboardstatus. Bewerk A's
    zoekprofiel: de proefdatums mogen niet opnieuw starten. Zet A op disabled en
    controleer dat writes worden geweigerd.

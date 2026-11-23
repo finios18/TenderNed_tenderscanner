@@ -59,6 +59,7 @@ export function CpvSelector({ value, onChange }: {
   }
 
   return <div className="cpv-selector">
+    <aside className="notice cpv-guidance" aria-label="Belangrijk bij je CPV-keuze"><strong>Kies je CPV-codes zo compleet mogelijk</strong><p>De CPV-selectie is de eerste inhoudelijke filter. Een aanbesteding zonder overeenkomende CPV-code wordt overgeslagen, ook als de inhoud interessant kan zijn. Zoektermen kunnen dat niet herstellen.</p><p>Vink bij twijfel liever meer mogelijk relevante codes aan dan te weinig. Kies waar passend ook de onderliggende codes. Een ruimere selectie vergroot de kans op extra resultaten; een te smalle selectie kan interessante opdrachten uitsluiten.</p></aside>
     <div className="cpv-intro"><span className="pill green">CPV 2008 · Nederlands</span>
       <p>{cpvMetadata.count.toLocaleString("nl-NL")} officiële basiscodes. Zoek in alle sectoren of open een divisie. Openen selecteert nog niets.</p>
     </div>
@@ -126,6 +127,6 @@ export function CpvSelector({ value, onChange }: {
         </div>;
       })}
     </div></section>
-    <p className="cpv-attribution">Bron: <a href={cpvMetadata.source_page} target="_blank" rel="noopener noreferrer">PIANOo</a> · <a href={cpvMetadata.structure_source} target="_blank" rel="noopener noreferrer">TED CPV 2008</a>. De aanvullende woordenlijst is niet opgenomen.</p>
+    <p className="cpv-attribution">Bron: <a href={cpvMetadata.source_page} target="_blank" rel="noopener noreferrer">PIANOo</a> · <a href={cpvMetadata.structure_source} target="_blank" rel="noopener noreferrer">TED CPV 2008</a>.</p>
   </div>;
 }

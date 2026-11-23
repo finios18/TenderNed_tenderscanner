@@ -21,17 +21,17 @@ describe("Profielvalidatie",()=>{
   it("valideert bedragen, frequentie, CPV en dubbele keywords",()=>{
     const p=structuredClone(emptyProfile);p.search.minimum_contract_value=100;p.search.maximum_contract_value=50;expect(profileSchema.safeParse(p).success).toBe(false);
     p.search.maximum_contract_value=null;p.cpv_codes=[{code:"72000000",description:"IT"},{code:"72000000-5",description:"Dubbel"}];expect(profileSchema.safeParse(p).success).toBe(false);
-    p.cpv_codes=[];p.keywords=[{keyword:"Python",type:"positive"},{keyword:"python",type:"positive"}];expect(profileSchema.safeParse(p).success).toBe(false);
-    p.keywords[1].type="negative";expect(profileSchema.safeParse(p).success).toBe(true);
+    p.cpv_codes=[];p.keywords=[{keyword:"Python"},{keyword:"python"}];expect(profileSchema.safeParse(p).success).toBe(false);
+    p.keywords[1].keyword="BI";expect(profileSchema.safeParse(p).success).toBe(true);
     expect(profileSchema.safeParse({...p,search:{...p.search,email_frequency_days:5}}).success).toBe(false);
     expect(profileSchema.safeParse({...p,company:{...p.company,website:"javascript:alert(1)"}}).success).toBe(false);
   });
-  it("houdt exports stabiel met gescheiden lijsten en volledige bedrijfscontext",()=>{
+  it("exporteert uitsluitend de huidige profielvelden en deelnames",()=>{
     const p=structuredClone(emptyProfile);p.company.company_name="Voorbeeld BV";p.search.business_description="Datadiensten";p.search.notification_email="test@example.com";
-    p.cpv_codes=[{code:"72000000-5",description:"IT"}];p.keywords=[{keyword:"Python",type:"positive"},{keyword:"Hardware",type:"negative"}];
-    p.historical_tenders=[{publication_id:"123456",original_input:"123456",category:"participated",notes:"Vergelijkbaar"}];
+    p.cpv_codes=[{code:"72000000-5",description:"IT"}];p.keywords=[{keyword:"Python"},{keyword:"Hardware"}];
+    p.historical_tenders=[{publication_id:"123456",original_input:"123456",notes:"Vergelijkbaar"}];
     expect(validateCompletion(p)).toEqual([]);
     const result=scannerExport({company_id:"fictief",revision:1,updated_at:"2026-11-19T12:00:00Z",onboarding_completed:true,profile:p,subscription:{status:"submitted",trial_started_at:null,trial_ends_at:null,activated_at:null}});
-    expect(result.schema_version).toBe(2);expect(result.scanner_config.cpv_whitelist).toEqual(["72000000"]);expect(result.scanner_config.negative_keywords).toEqual(["Hardware"]);expect(result.historical_tenders.participated[0].notes).toBe("Vergelijkbaar");
+    expect(result.schema_version).toBe(3);expect(result.scanner_config.cpv_whitelist).toEqual(["72000000"]);expect(result.scanner_config).not.toHaveProperty("negative_keywords");expect(result.historical_tenders[0].notes).toBe("Vergelijkbaar");
   });
 });

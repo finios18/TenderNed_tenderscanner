@@ -7,7 +7,7 @@ inhoudelijke keywords en titelherkenning van PDF/DOCX-leidraden. Optioneel
 beoordeelt OpenAI een leidraad. Resultaten worden GO/MAYBE/NO_GO met
 JSON-output; GitHub Actions maakt een leesbare HTML-mail. Voor de website zijn
 vooral bedrijfscontext, CPV-whitelist, keywords en mailfrequentie relevant.
-Negatieve keywords, historie en diverse voorkeuren uit deze website hebben
+Historische deelnames en diverse voorkeuren uit deze website hebben
 nog geen automatische implementatie in de scanner. De export is input voor
 handmatige inrichting, geen claim van directe plug-and-play compatibiliteit.
 

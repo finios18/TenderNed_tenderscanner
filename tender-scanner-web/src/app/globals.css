@@ -28,3 +28,19 @@ a { color:inherit; text-decoration:none; } button,input,textarea,select { font:i
 .steps-nav ol { max-width:100%; }
 .cpv-scope select { min-width:0;max-width:100%; }
 @media(max-width:760px) { .onboard-layout { grid-template-columns:minmax(0,1fr); } }
+
+/* Transparante procesflow; de volgorde blijft op ieder scherm gelijk. */
+.process-flow { margin-top:48px; padding-top:36px; border-top:1px solid var(--line); }
+.process-flow>h3 { font-size:1.5rem; }
+.process-flow>p { max-width:800px; }
+.process-steps { list-style:none; padding:0; margin:28px 0; counter-reset:process; }
+.process-steps>li { position:relative; padding:0 0 28px 60px; counter-increment:process; min-width:0; }
+.process-steps>li::before { content:counter(process); position:absolute; left:0; top:0; width:36px; height:36px; border-radius:50%; display:grid; place-items:center; background:var(--teal); color:white; font-weight:700; z-index:1; }
+.process-steps>li:not(:last-child)::after { content:""; position:absolute; left:17px; top:36px; bottom:0; width:2px; background:var(--line); }
+.process-steps h4 { margin:0 0 8px; font-size:1.0625rem; line-height:1.5; }
+.process-steps p { max-width:850px; margin-bottom:10px; font-size:1rem; }
+.process-outcome { color:#795313; }
+.cpv-guidance { background:#fff8e9; border:1px solid #e7cc91; border-left:4px solid #aa7623; border-radius:8px; padding:20px; margin:20px 0 28px; }
+.cpv-guidance>strong { display:block; color:var(--ink); font-size:1rem; }
+.cpv-guidance p { color:#63502c; font-size:1rem; margin:10px 0 0; }
+@media(max-width:760px) { .process-steps>li { padding-left:48px; } .cpv-guidance { padding:16px; } }

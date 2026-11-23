@@ -3,6 +3,7 @@ import ast
 import contextlib
 import io
 import json
+import csv
 import os
 import re
 import zipfile
@@ -21,11 +22,12 @@ def load_scan_functions():
     names = {"AANBESTEDING_KEYWORDS", "SUPPORTING_TENDER_DOC_TERMS", "SKIP_EVENTS", "KEYWORDS"}
     functions = {"_norm_title", "leidraad_title_hits", "supporting_doc_title_hits",
                  "leidraad_score", "find_leidraad_candidates", "scan_recent", "record_skip", "looks_like_zip",
+                 "write_selected_leidraad_report",
                  "try_extract_docx_text", "supported_document_type", "safe_zip_iter", "analyze_leidraad_with_openai", "_extract_json_object"}
     nodes = [node for node in tree.body if
              isinstance(node, ast.FunctionDef) and node.name in functions or
              isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in names for t in node.targets)]
-    namespace = dict(os=os, json=json, time=time, re=re, zipfile=zipfile, ET=ET, BytesIO=io.BytesIO, DAYS_BACK_DEFAULT=1,
+    namespace = dict(os=os, json=json, csv=csv, time=time, re=re, zipfile=zipfile, ET=ET, BytesIO=io.BytesIO, DAYS_BACK_DEFAULT=1,
                      OPENAI_MODEL_DEFAULT="test", PDF_PARSE_TIMEOUT_S=60,
                      OPENAI_ANALYSIS_TIMEOUT_S=180,
                      SLOW_STEP_S=2, VERBOSE_STEPS=False, KEYWORDS=["python"], WEB_BASE="https://example.test")
@@ -111,6 +113,9 @@ class LeidraadTests(unittest.TestCase):
             report = json.loads((Path(folder) / "overgeslagen_zonder_leidraad.json").read_text(encoding="utf-8"))
             events = json.loads((Path(folder) / "overgeslagen_overzicht.json").read_text(encoding="utf-8"))["events"]
             self.assertEqual(json.loads((Path(folder) / "current_scan_results.json").read_text(encoding="utf-8")), [])
+            self.assertEqual(json.loads((Path(folder) / "geselecteerde_leidraden.json").read_text(encoding="utf-8"))["count"], 0)
+            with (Path(folder) / "geselecteerde_leidraden.csv").open(encoding="utf-8-sig", newline="") as stream:
+                self.assertEqual(list(csv.DictReader(stream, delimiter=";")), [])
         publication = report["publications"][0]
         self.assertEqual(publication["publication_id"], "123")
         self.assertEqual(publication["title"], "Test inhuur")
@@ -140,6 +145,9 @@ class LeidraadTests(unittest.TestCase):
             ("no_go", "openai_no_go"),
             ("docx", "openai_no_go"),
             ("zip_docx", "openai_no_go"),
+            ("two_leidraden", "openai_no_go"),
+            ("al_fallback", "openai_no_go"),
+            ("ai_disabled", "openai_disabled"),
         ]
         for scenario, expected in cases:
             with self.subTest(scenario=scenario):
@@ -152,13 +160,18 @@ class LeidraadTests(unittest.TestCase):
                     doc.update(documentNaam="Toelatingsdocument.docx", typeDocument={"code": "docx"})
                 if scenario == "zip_docx":
                     doc.update(documentNaam="Stukken.zip", typeDocument={"code": "zip"})
+                if scenario == "al_fallback":
+                    doc.update(documentNaam="AL.pdf")
+                documents = [doc]
+                if scenario == "two_leidraden":
+                    documents.insert(0, {**doc, "documentNaam": "AL.pdf"})
                 cpv = ([], set()) if scenario == "missing_cpv" else (["99999999"], {"99999999"}) if scenario == "cpv" else (["79620000"], {"79620000"})
                 ns.update(log=Mock(), hr=Mock(), build_tenderned_list_params=Mock(return_value={}),
                           PdfParseSupervisor=Mock(), within_last_days=Mock(return_value=scenario != "date"),
                           fetch_list_page=Mock(return_value={"content": [{"id": 123, "datum": "2026-10-07"}]}),
                           fetch_detail=Mock(return_value={"aanbestedingNaam": "Test"}),
                           collect_all_cpv=Mock(return_value=cpv), CPV_WHITELIST={"79620000"},
-                          fetch_documents=Mock(return_value=[doc]), download_bytes=Mock(return_value=b"pdf"),
+                          fetch_documents=Mock(return_value=documents), download_bytes=Mock(return_value=b"pdf"),
                           process_document_blob=Mock(return_value=("TIMEOUT" if scenario == "timeout" else "OK",
                                                                  [] if scenario in {"no_keywords", "timeout"} else ["detachering"])),
                           analyze_leidraad_with_openai=Mock(return_value={"status": "ERROR", "error": "test"} if scenario == "ai_error" else
@@ -168,9 +181,31 @@ class LeidraadTests(unittest.TestCase):
                 if scenario == "zip_docx":
                     ns["safe_zip_iter"] = Mock(return_value=[("Stukken/Leidraad.docx", "Leidraad.docx", b"PK-test", True, False)])
                 with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
-                    ns["scan_recent"](max_pages=1, download_dir=folder, throttle_s=0, analyze_openai=True)
+                    ns["scan_recent"](max_pages=1, download_dir=folder, throttle_s=0, analyze_openai=scenario != "ai_disabled")
                     events = json.loads((Path(folder) / "overgeslagen_overzicht.json").read_text(encoding="utf-8"))["events"]
+                    selected = json.loads((Path(folder) / "geselecteerde_leidraden.json").read_text(encoding="utf-8"))
+                    with (Path(folder) / "geselecteerde_leidraden.csv").open(encoding="utf-8-sig", newline="") as stream:
+                        csv_rows = list(csv.DictReader(stream, delimiter=";"))
                 self.assertIn(expected, {event["reason"] for event in events})
+                has_selection = scenario in {"ai_error", "no_go", "docx", "zip_docx", "two_leidraden", "al_fallback", "ai_disabled"}
+                self.assertEqual(selected["count"], int(has_selection))
+                self.assertEqual(len(csv_rows), selected["count"])
+                if has_selection:
+                    row = selected["selections"][0]
+                    self.assertEqual(row["publication_id"], "123")
+                    self.assertEqual(row["publication_title"], "Test")
+                    self.assertEqual(row["score"], ns["leidraad_score"](row["document_title"]))
+                    self.assertEqual(row["title_hits"], ns["leidraad_title_hits"](row["document_title"]))
+                    self.assertEqual(csv_rows[0]["bestandsnaam"], row["document_title"])
+                    if scenario == "two_leidraden":
+                        self.assertEqual(row["document_title"], "Leidraad.pdf")
+                    if scenario == "ai_disabled":
+                        self.assertEqual(row["analysis_status"], "NOT_RUN")
+                        ns["analyze_leidraad_with_openai"].assert_not_called()
+                    elif scenario == "ai_error":
+                        self.assertEqual(row["analysis_status"], "ERROR")
+                    else:
+                        self.assertEqual(row["decision"], "NO_GO")
                 if scenario in {"docx", "zip_docx"}:
                     self.assertTrue(ns["analyze_leidraad_with_openai"].call_args.kwargs["pdf_path"].endswith(".docx"))
                     self.assertEqual(next(event for event in events if event["reason"] == "openai_no_go")["document_type"], "docx")

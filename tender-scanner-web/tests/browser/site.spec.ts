@@ -44,6 +44,8 @@ async function mockAccount(page:Page, signedIn=true){
 
 test("homepage is responsive, registration is reachable and private routes require login",async({page})=>{
   await page.goto("/");await expect(page.getByRole("heading",{name:/De juiste opdracht/})).toBeVisible();
+  await expect(page.locator("#werkwijze .process-steps > li")).toHaveCount(7);
+  await expect(page.getByText("Afgevallen op CPV?",{exact:false})).toBeVisible();
   await page.screenshot({path:"test-results/home-desktop.png",fullPage:true});
   await page.setViewportSize({width:390,height:844});await expect(page.locator("body")).toHaveJSProperty("scrollWidth",390);
   await page.screenshot({path:"test-results/home-mobile.png",fullPage:true});
@@ -63,6 +65,7 @@ test("registration requests confirmation and login opens the account",async({pag
 test("eight-step onboarding saves, edits lists, normalizes history and submits",async({page})=>{
   const read=await mockAccount(page);await page.goto("/onboarding/");
   await page.getByLabel("Bedrijfsnaam",{exact:true}).fill("Fictieve Data BV");await page.getByRole("button",{name:"Bewaar en verder"}).click();
+  for(const label of ["Wat zijn jullie belangrijkste specialisaties?","Wat lever je nadrukkelijk niet?","Wat onderscheidt jouw bedrijf?"]) await expect(page.getByLabel(label,{exact:true})).toHaveCount(0);
   await page.getByLabel("Wat doet jouw bedrijf?",{exact:true}).fill("Wij leveren data engineers en analisten.");await page.getByRole("button",{name:"Bewaar en verder"}).click();
   await page.getByRole("button",{name:"Open onderliggende codes van 72000000-5"}).click();
   await expect(page.getByRole("checkbox",{name:/72300000-8/})).toBeVisible();
@@ -70,14 +73,16 @@ test("eight-step onboarding saves, edits lists, normalizes history and submits",
   await page.getByRole("checkbox",{name:/72000000-5/}).check();
   await expect(page.getByRole("heading",{name:"Geselecteerde CPV-codes (1)"})).toBeVisible();
   await page.getByLabel("Bereik voor 72000000-5",{exact:true}).selectOption("subtree");
-  await page.getByRole("button",{name:"Bewaar en verder"}).click();await page.getByLabel("Positieve keywords",{exact:true}).fill("Python, data engineering, Python");await page.getByRole("button",{name:"Toevoegen",exact:true}).first().click();
-  await page.getByLabel("Negatieve keywords",{exact:true}).fill("hardware");await page.getByRole("button",{name:"Toevoegen",exact:true}).nth(1).click();await page.getByRole("button",{name:"Bewaar en verder"}).click();
+  await page.getByRole("button",{name:"Bewaar en verder"}).click();await page.getByLabel("Keywords",{exact:true}).fill("Python, data engineering, Python");await page.getByRole("button",{name:"Toevoegen",exact:true}).first().click();
+  await expect(page.getByLabel("Negatieve keywords",{exact:true})).toHaveCount(0);await page.getByRole("button",{name:"Bewaar en verder"}).click();
+  await expect(page.getByRole("button",{name:"Publicaties toevoegen",exact:true})).toHaveCount(1);
   await page.getByLabel("Publicaties toevoegen: aan deelgenomen",{exact:true}).fill("123456\nhttps://www.tenderned.nl/aankondigingen/overzicht/123456/publicatie\n234567");await page.getByRole("button",{name:"Publicaties toevoegen",exact:true}).first().click();
   await page.getByLabel("Toelichting bij 123456",{exact:false}).fill("Vergelijkbare opdracht");await page.getByRole("button",{name:"Bewaar en verder"}).click();
+  for(const label of ["Gewenste regio’s","Voorkeur voor opdrachtgevers","Certificeringen en vereisten die je bezit"]) await expect(page.getByLabel(label,{exact:true})).toHaveCount(0);
   await page.getByRole("button",{name:"Bewaar en verder"}).click();await page.getByLabel("Ontvangstfrequentie").selectOption("3");await page.getByRole("button",{name:"Bewaar en verder"}).click();
   await page.screenshot({path:"test-results/onboarding-review.png",fullPage:true});await page.getByRole("checkbox").check();await page.getByRole("button",{name:"Aanmelding bevestigen"}).click();
   await expect(page).toHaveURL(/dashboard/);await expect(page.getByRole("heading",{name:"Aanmelding ontvangen"})).toBeVisible();
-  expect(read().profile.keywords).toHaveLength(3);expect(read().profile.historical_tenders).toHaveLength(2);expect(read().profile.search.email_frequency_days).toBe(3);expect(read().profile.search.minimum_contract_value).toBeNull();expect(read().profile.cpv_codes[0].include_descendants).toBe(true);
+  expect(read().profile.keywords).toHaveLength(2);expect(read().profile.historical_tenders).toHaveLength(2);expect(read().profile.search.email_frequency_days).toBe(3);expect(read().profile.search.minimum_contract_value).toBeNull();expect(read().profile.cpv_codes[0].include_descendants).toBe(true);
   await page.getByRole("link",{name:"Zoekprofiel wijzigen"}).click();await expect(page.getByLabel("Bedrijfsnaam",{exact:true})).toHaveValue("Fictieve Data BV");
   await page.getByRole("button",{name:/CPV-codes/}).click();await expect(page.getByLabel("Bereik voor 72000000-5",{exact:true})).toHaveValue("subtree");
   await page.getByRole("button",{name:"Verwijder CPV-code 72000000-5"}).click();await page.getByRole("button",{name:"Tussentijds opslaan"}).click();await expect(page.getByRole("status").filter({hasText:"Opgeslagen"})).toBeVisible();expect(read().profile.cpv_codes).toHaveLength(0);
@@ -88,6 +93,8 @@ test("CPV-selector searches all sectors, distinguishes exact/subtree and works o
   await page.goto("/onboarding/?stap=3");
   await expect(page.getByRole("heading",{name:"CPV-codes",exact:true})).toBeVisible();
   await expect(page.getByText("9.454 officiële basiscodes.",{exact:false})).toBeVisible();
+  await expect(page.getByLabel("Belangrijk bij je CPV-keuze")).toContainText("liever meer mogelijk relevante codes aan dan te weinig");
+  await expect(page.getByText("De aanvullende woordenlijst is niet opgenomen.",{exact:false})).toHaveCount(0);
   await page.getByLabel("Zoek een CPV-code",{exact:true}).fill("politieauto");
   await page.getByRole("checkbox",{name:/34114200-1/}).check();
   await expect(page.getByLabel("Bereik voor 34114200-1",{exact:true})).toHaveValue("exact");

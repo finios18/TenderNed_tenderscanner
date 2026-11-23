@@ -30,6 +30,7 @@ beforeAll(async () => {
     (values('72000000','Eigen bewaarde omschrijving'),('99999999','Oude onbekende selectie')) items(code,description) where c.owner_user_id=$1`, [A]);
   await db.exec(await readFile(new URL("../supabase/migrations/202611190002_cpv_catalog.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../supabase/migrations/202611190003_cpv_selection.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../supabase/migrations/202611230001_simplify_profile.sql", import.meta.url), "utf8"));
 }, 60000);
 afterAll(async () => { await db?.close(); });
 
@@ -40,7 +41,7 @@ describe.sequential("CPV-upgrade, opslag en autorisatie", () => {
     expect(w.profile.cpv_codes).toHaveLength(2);
     expect(w.profile.cpv_codes.find(c => c.code === "72000000-5")).toMatchObject({ include_descendants: false, original_description: "Eigen bewaarde omschrijving" });
     expect(w.profile.cpv_codes.some(c => c.code === "99999999")).toBe(true);
-    expect(w.revision).toBe(0); expect(w.subscription.trial_started_at).toBeNull();
+    expect(w.revision).toBe(1); expect(w.subscription.trial_started_at).toBeNull();
   });
   it("weigert onbekende codes, fout controlecijfer en duplicaten ook rechtstreeks via de RPC", async () => {
     await asUser(A); const w = await workspace();
@@ -49,7 +50,7 @@ describe.sequential("CPV-upgrade, opslag en autorisatie", () => {
     await expect(save(w)).rejects.toThrow(/officiële CPV/);
     w.profile.cpv_codes = [{code:"72000000",description:"IT"},{code:"72000000-5",description:"IT"}];
     await expect(save(w)).rejects.toThrow(/duplicate key/i);
-    expect((await workspace()).revision).toBe(0);
+    expect((await workspace()).revision).toBe(1);
     expect((await workspace()).profile.cpv_codes).toHaveLength(2);
   });
   it("bewaart exact/subtree expliciet en laadt dezelfde selectie na een nieuwe sessie", async () => {

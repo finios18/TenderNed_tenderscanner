@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "customer_id": "33333333-3333-4333-8333-333333333333",
   "company": {
     "company_name": "Fictieve Data BV",
@@ -20,11 +20,8 @@
   "business_context": {
     "description": "Fictief bedrijf voor data-engineering en tijdelijke inzet van analisten.",
     "services": "Detachering en data-advies",
-    "specializations": "Python, BI en data engineering",
     "sectors": "Gemeenten en onderwijs",
-    "desired_contracts": "Raamovereenkomsten voor personele inzet",
-    "excluded_services": "Hardware en softwarelicenties",
-    "competitive_advantages": "Ervaring met gemeentelijke datavraagstukken"
+    "desired_contracts": "Raamovereenkomsten voor personele inzet"
   },
   "scanner_config": {
     "cpv_whitelist": [
@@ -50,35 +47,25 @@
       "Data engineering",
       "Python"
     ],
-    "negative_keywords": [
-      "Hardwarelevering"
-    ],
     "email_frequency_days": 3,
     "notification_email": "selectie@example.com",
     "email_notes": "Fictief voorbeeld, dit adres ontvangt geen rapporten.",
-    "geographic_preferences": "Midden-Nederland",
     "minimum_contract_value": null,
     "maximum_contract_value": 80000000,
     "preferred_contract_types": "Raamovereenkomst, DAS",
-    "preferred_buyers": "Gemeenten",
-    "certifications": "Alleen fictieve voorbeeldgegevens",
     "additional_requirements": "Geen hardwarelevering",
     "cpv_dataset": {
       "classification": "CPV 2008",
       "source_sha256": "307d7f4fe6ac5b19e8a558ed8d9bc4f4591b96b7a09fb79b23d2ecb39d4a8608"
     }
   },
-  "historical_tenders": {
-    "participated": [
-      {
-        "publication_id": "123456",
-        "original_input": "123456",
-        "notes": "Fictieve voorbeeld-ID; geen claim over de werkelijke publicatie."
-      }
-    ],
-    "interesting": [],
-    "not_interesting": []
-  },
+  "historical_tenders": [
+    {
+      "publication_id": "123456",
+      "original_input": "123456",
+      "notes": "Fictieve voorbeeld-ID; geen claim over de werkelijke publicatie."
+    }
+  ],
   "subscription": {
     "status": "submitted",
     "trial_started_at": null,

@@ -18,10 +18,10 @@ export const storedProfileSchema = z.object({
     company_size: z.enum(["", "1", "2–10", "11–50", "51–250", "251+"]),
   }).strict(),
   search: z.object({
-    business_description: text, services_description: text, specializations: text, sectors: text,
-    desired_contracts: text, excluded_services: text, competitive_advantages: text,
-    geographic_preferences: text, minimum_contract_value: money, maximum_contract_value: money,
-    preferred_contract_types: text, preferred_buyers: text, certifications: text,
+    business_description: text, services_description: text, sectors: text,
+    desired_contracts: text,
+    minimum_contract_value: money, maximum_contract_value: money,
+    preferred_contract_types: text,
     additional_requirements: text, cpv_notes: text, email_notes: text,
     email_frequency_days: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(7), z.literal(14)]),
     notification_email: email,
@@ -29,9 +29,9 @@ export const storedProfileSchema = z.object({
   cpv_codes: z.array(z.object({ code: z.string().regex(cpvPattern, "Gebruik een geldige CPV-code."), description: short,
     include_descendants: z.boolean().optional(), original_description: z.string().max(12000).nullable().optional(),
   }).strict()).max(150),
-  keywords: z.array(z.object({ keyword: z.string().trim().min(1).max(150), type: z.enum(["positive", "negative"]) }).strict()).max(300),
+  keywords: z.array(z.object({ keyword: z.string().trim().min(1).max(150) }).strict()).max(300),
   historical_tenders: z.array(z.object({ publication_id: z.string().regex(publicationPattern), original_input: z.string().max(2048),
-    category: z.enum(["participated", "interesting", "not_interesting"]), notes: z.string().max(4000) }).strict()).max(500),
+    notes: z.string().max(4000) }).strict()).max(500),
 }).strict();
 export const profileSchema = storedProfileSchema.superRefine((data, ctx) => {
   data.cpv_codes.forEach((selection,index) => {
@@ -41,10 +41,10 @@ export const profileSchema = storedProfileSchema.superRefine((data, ctx) => {
   if (min !== null && max !== null && min > max) ctx.addIssue({ code: "custom", path: ["search", "maximum_contract_value"], message: "De maximale waarde moet minstens de minimale waarde zijn." });
   if (new Set(data.cpv_codes.map(c => c.code.split("-")[0])).size !== data.cpv_codes.length)
     ctx.addIssue({ code: "custom", path: ["cpv_codes"], message: "Een CPV-code staat dubbel in de whitelist." });
-  if (new Set(data.keywords.map(k => `${k.type}:${k.keyword.toLowerCase()}`)).size !== data.keywords.length)
-    ctx.addIssue({ code: "custom", path: ["keywords"], message: "Een keyword staat dubbel in dezelfde categorie." });
-  if (new Set(data.historical_tenders.map(t => `${t.category}:${t.publication_id}`)).size !== data.historical_tenders.length)
-    ctx.addIssue({ code: "custom", path: ["historical_tenders"], message: "Een publicatie staat dubbel in dezelfde categorie." });
+  if (new Set(data.keywords.map(k => k.keyword.toLowerCase())).size !== data.keywords.length)
+    ctx.addIssue({ code: "custom", path: ["keywords"], message: "Een keyword staat dubbel." });
+  if (new Set(data.historical_tenders.map(t => t.publication_id)).size !== data.historical_tenders.length)
+    ctx.addIssue({ code: "custom", path: ["historical_tenders"], message: "Een publicatie staat dubbel." });
 });
 export type Profile = z.infer<typeof profileSchema>;
 export type Subscription = { status: "pending" | "submitted" | "active" | "expired" | "disabled"; trial_started_at: string | null; trial_ends_at: string | null; activated_at: string | null };
@@ -52,7 +52,7 @@ export type Workspace = { company_id: string; revision: number; updated_at: stri
 
 export const emptyProfile: Profile = {
   company: { company_name: "", website: "", kvk_number: "", contact_person: "", contact_email: "", phone_number: "", city: "", company_size: "" },
-  search: { business_description: "", services_description: "", specializations: "", sectors: "", desired_contracts: "", excluded_services: "", competitive_advantages: "", geographic_preferences: "", minimum_contract_value: null, maximum_contract_value: null, preferred_contract_types: "", preferred_buyers: "", certifications: "", additional_requirements: "", cpv_notes: "", email_notes: "", email_frequency_days: 7, notification_email: "" },
+  search: { business_description: "", services_description: "", sectors: "", desired_contracts: "", minimum_contract_value: null, maximum_contract_value: null, preferred_contract_types: "", additional_requirements: "", cpv_notes: "", email_notes: "", email_frequency_days: 7, notification_email: "" },
   cpv_codes: [], keywords: [], historical_tenders: [],
 };
 

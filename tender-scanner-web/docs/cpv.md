@@ -127,11 +127,11 @@ database vereist beheerderstoegang en is niet impliciet gedaan door codewijzigin
 
 ## Export en de bestaande scanner
 
-Exportversie 2 bevat dezelfde hoofdstructuur, met toegevoegde CPV-semantiek:
+Exportversie 3 behoudt de CPV-semantiek uit versie 2:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "scanner_config": {
     "cpv_whitelist": ["72000000"],
     "cpv_details": [{
@@ -157,4 +157,4 @@ Zowel `admin_export_config` in SQL als de eigen gegevensdownload gebruiken deze
 uitwerking. Tests vergelijken beide exports exact. Gebruik de uitgebreide
 whitelist later handmatig als `CPV_WHITELIST_RAW` in een klantspecifieke scanner.
 De Python-scanner is niet gewijzigd. De selectie/prompt/workflow wordt nog steeds
-handmatig ingericht; versie 2 is geen automatische scannerintegratie.
+handmatig ingericht; ook versie 3 is geen automatische scannerintegratie.

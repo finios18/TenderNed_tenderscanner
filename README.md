@@ -335,6 +335,17 @@ Results are stored as JSON files in the publication folder.
 
 ## Output Structure
 
+Each run also writes `geselecteerde_leidraden.csv` (Excel, semicolon-separated)
+and `geselecteerde_leidraden.json` at the root of `recent_downloads/`. These list
+the single selected lead document per publication, its title, publication,
+organisation, file type, score, matched title terms, content keyword hits and
+file path, plus the AI status and decision when available. Other candidates are
+not listed as selected. The list includes NO_GO/MAYBE decisions, failed analyses
+and selections made with AI disabled. An empty scan produces an empty report.
+Paths reflect the final GO/Overig location. Both reports are included in the
+`tender-results` GitHub artifact. Artifact upload is also attempted after a
+failed scan; reports written on shutdown then contain the selections so far.
+
 ```text
 recent_downloads/
 │

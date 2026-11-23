@@ -17,6 +17,7 @@ beforeAll(async()=>{
   await db.exec(await readFile(new URL("../supabase/migrations/202611190001_initial.sql",import.meta.url),"utf8"));
   await db.exec(await readFile(new URL("../supabase/migrations/202611190002_cpv_catalog.sql",import.meta.url),"utf8"));
   await db.exec(await readFile(new URL("../supabase/migrations/202611190003_cpv_selection.sql",import.meta.url),"utf8"));
+  await db.exec(await readFile(new URL("../supabase/migrations/202611230001_simplify_profile.sql",import.meta.url),"utf8"));
   await db.query("insert into auth.users values($1,'a@example.com',now()),($2,'b@example.com',now())",[A,B]);
   await asUser(A);cidA=(await workspace()).company_id;await asUser(B);cidB=(await workspace()).company_id;
 },60000);
@@ -32,7 +33,7 @@ describe.sequential("PostgreSQL: twee gebruikers, RLS en transacties",()=>{
   });
   it("slaat een compleet profiel atomair op, zonder de proefperiode te activeren",async()=>{
     await asUser(A);const p=structuredClone(emptyProfile);p.company.company_name="Fictieve Data BV";p.search.business_description="Data engineering";p.search.notification_email="a@example.com";
-    p.cpv_codes=[{code:"72000000",description:"IT"}];p.keywords=[{keyword:"Python",type:"positive"},{keyword:"Hardware",type:"negative"}];p.historical_tenders=[{publication_id:"123456",original_input:"123456",category:"interesting",notes:"Fictief"}];
+    p.cpv_codes=[{code:"72000000",description:"IT"}];p.keywords=[{keyword:"Python"},{keyword:"Hardware"}];p.historical_tenders=[{publication_id:"123456",original_input:"123456",notes:"Fictief"}];
     const result=(await save(p,0,true)).rows[0].w;expect(profileSchema.safeParse(result.profile).success).toBe(true);expect(result.revision).toBe(1);expect(result.subscription.status).toBe("submitted");expect(result.subscription.trial_started_at).toBeNull();
     await expect(db.exec("update public.subscriptions set status='active'")).rejects.toThrow(/permission denied/i);
     await asUser(B);for(const table of ["cpv_codes","keywords","historical_tenders"]){expect((await db.query(`select * from public.${table}`)).rows).toHaveLength(0);}
@@ -46,7 +47,7 @@ describe.sequential("PostgreSQL: twee gebruikers, RLS en transacties",()=>{
     expect((await workspace()).revision).toBe(w.revision);
   });
   it("ondersteunt wijzigen en verwijderen van keywords, CPV en publicaties",async()=>{
-    await asUser(A);const w=await workspace();w.profile.keywords=[{keyword:"BI",type:"positive"}];w.profile.cpv_codes=[];w.profile.historical_tenders=[];
+    await asUser(A);const w=await workspace();w.profile.keywords=[{keyword:"BI"}];w.profile.cpv_codes=[];w.profile.historical_tenders=[];
     const saved=(await save(w.profile,w.revision)).rows[0].w;expect(saved.profile.cpv_codes).toEqual([]);expect(saved.profile.keywords[0].keyword).toBe("BI");expect(saved.onboarding_completed).toBe(true);
   });
   it("exporteert alleen als beheerder, met dezelfde structuur als de app",async()=>{

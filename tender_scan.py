@@ -13,6 +13,7 @@ from dateutil import parser as dtp
 import requests
 import zipfile
 import json
+import csv
 import shutil
 import re
 import xml.etree.ElementTree as ET
@@ -680,6 +681,52 @@ def find_leidraad_candidates(downloaded_documents):
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates, supporting
 
+def write_selected_leidraad_report(download_dir, selections, analysis_results):
+    """Rapporteer de daadwerkelijk gekozen kandidaat, onafhankelijk van het AI-oordeel."""
+    rows = []
+    for selection in selections:
+        document = selection["document"]
+        result = analysis_results.get(selection["publication_id"], {})
+        rows.append({
+            "publication_id": str(selection["publication_id"]),
+            "publication_title": selection["publication_title"],
+            "organisation": selection["organisation"],
+            "document_title": document["name"],
+            "document_type": supported_document_type("", document["path"]),
+            "score": document["score"],
+            "title_hits": document["title_hits"],
+            "keyword_hits": document.get("keyword_hits", []),
+            "path": document["path"],
+            "source": document.get("source", ""),
+            "analysis_status": result.get("status", "NOT_RUN"),
+            "decision": (result.get("analysis") or {}).get("decision", ""),
+        })
+    json_path = os.path.join(download_dir, "geselecteerde_leidraden.json")
+    with open(json_path, "w", encoding="utf-8") as stream:
+        json.dump({"created_at": ams_now().isoformat(), "count": len(rows), "selections": rows},
+                  stream, ensure_ascii=False, indent=2)
+    columns = {
+        "publication_id": "publicatie_id", "publication_title": "aanbesteding",
+        "organisation": "opdrachtgever", "document_title": "bestandsnaam",
+        "document_type": "bestandstype", "score": "score", "title_hits": "gematchte_titeltermen",
+        "keyword_hits": "gevonden_zoektermen", "path": "bestandspad", "source": "bron",
+        "analysis_status": "analysestatus", "decision": "ai_oordeel",
+    }
+    csv_path = os.path.join(download_dir, "geselecteerde_leidraden.csv")
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream, delimiter=";")
+        writer.writerow(columns.values())
+        for row in rows:
+            values = []
+            for key in columns:
+                value = row[key]
+                text = ", ".join(value) if isinstance(value, list) else str(value)
+                # Externe titels worden in Excel nooit als formule uitgevoerd.
+                values.append("'" + text if text.lstrip().startswith(("=", "+", "-", "@")) else text)
+            writer.writerow(values)
+    print(f"- Geselecteerde leidraden: {len(rows)} | {csv_path} | {json_path}")
+
+
 # ==== Helpers: PDF / keywords ====
 def try_extract_docx_text(blob: bytes):
     """Lees alinea's, tabellen en kop-/voetteksten uit DOCX met de standaardbibliotheek."""
@@ -978,6 +1025,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
     matched_publications = {}
     # Per publicatie bewaren we welke documenten vermoedelijk de leidraad zijn.
     leidraad_candidates_by_publication = {}
+    selected_leidraden = []
     supporting_doc_candidates_by_publication = {}
     openai_results_by_publication = {}
     publications_without_leidraad = []
@@ -1266,6 +1314,10 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                     if leidraad_candidates:
                         leidraad_candidates_by_publication[pid] = leidraad_candidates
                         best = leidraad_candidates[0]
+                        selected_leidraden.append({
+                            "publication_id": pid, "publication_title": naam,
+                            "organisation": org, "document": best,
+                        })
                         print(f"   → LEIDRAAD-KANDIDAAT NA KEYWORD-FILTER: {best['name']} | score: {best['score']} | match: {', '.join(best['title_hits'])} | pad: {best['path']}")
 
                         if analyze_openai:
@@ -1352,6 +1404,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
         skip_report_path = os.path.join(download_dir, "overgeslagen_overzicht.json")
         with open(skip_report_path, "w", encoding="utf-8") as f:
             json.dump({"created_at": ams_now().isoformat(), "events": SKIP_EVENTS}, f, ensure_ascii=False, indent=2)
+        write_selected_leidraad_report(download_dir, selected_leidraden, openai_results_by_publication)
 
     print("\nOVERZICHT ALLE OVERSLAANREDENEN")
     for event in SKIP_EVENTS:
