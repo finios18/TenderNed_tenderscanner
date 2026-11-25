@@ -1,0 +1,56 @@
+name: Scanner Tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.py"
+      - "tests/**"
+      - "database/**"
+      - "profiles/**"
+      - "prompts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/scanner-tests.yml"
+  pull_request:
+    paths:
+      - "*.py"
+      - "tests/**"
+      - "database/**"
+      - "profiles/**"
+      - "prompts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/scanner-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: tenderscanner_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.3"
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Offline and disposable PostgreSQL tests
+        env:
+          TEST_SCANNER_ADMIN_URL: postgresql://postgres:test-only@localhost:5432/tenderscanner_test
+        run: uv run --locked python -m unittest discover -s tests -v

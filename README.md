@@ -1,5 +1,154 @@
 # TenderNed Data & Detachering Tender Scanner
 
+## Databasevoortgang instellen (nieuwe, optionele route)
+
+De databasevariant is voorbereid, maar **niet ingeschakeld voor geplande scans**.
+De bestaande zondagscan en de huidige Jan Snel-planning blijven stateloos werken
+totdat een databaseproef is geslaagd. Er zijn geen Supabase-tabellen of secrets
+automatisch aangemaakt.
+
+### Eenmalige inrichting in Supabase en GitHub
+
+1. Gebruik je bestaande Supabase/PostgreSQL-project of maak een project aan.
+2. Open de SQL Editor als databasebeheerder en voer `database/001_scanner.sql`
+   één keer uit. Dit maakt een apart, privé `scanner`-schema en een beperkte
+   `scanner_worker`-rol. Voeg dit schema **niet** toe aan de exposed API schemas.
+   De bestaande website-tabellen worden niet aangepast.
+3. Kies zelf een sterk wachtwoord en voer afzonderlijk uit:
+
+   ```sql
+   ALTER ROLE scanner_worker LOGIN PASSWORD '<jouw-eigen-wachtwoord>';
+   ```
+
+   Vervang de placeholder lokaal in de SQL Editor. Zet het echte wachtwoord niet
+   in een bestand, commit, chatbericht of Actions-log.
+4. Open in Supabase **Connect → Session pooler**. Gebruik de weergegeven host,
+   database en poort, maar verander de gebruiker van `postgres.<project-ref>`
+   naar `scanner_worker.<project-ref>` en gebruik het gekozen scannerwachtwoord.
+   Het URI-formaat is bijvoorbeeld:
+
+   ```text
+   postgresql://scanner_worker.PROJECT_REF:URL_ENCODED_PASSWORD@SESSION_POOLER_HOST:5432/postgres?sslmode=require
+   ```
+
+   Gebruik de echte waarden uit jouw project, inclusief de exacte poolerhost;
+   URL-encode speciale tekens in het wachtwoord. Gebruik **session mode** of een
+   directe PostgreSQL-verbinding, geen transaction pooler: de scanner gebruikt
+   een sessiegebonden advisory lock per bedrijf. Voor certificaatverificatie
+   ondersteunt de verbinding ook `sslmode=verify-full` met een CA-certificaat.
+   Zie [Supabase-verbindingen](https://supabase.com/docs/guides/database/connecting-to-postgres).
+5. Voeg in GitHub onder **Settings → Secrets and variables → Actions →
+   Repository secrets** de volledige verbindingsstring toe als
+   `SCANNER_DATABASE_URL`. Alle bedrijfsscans kunnen dit secret delen; de
+   scannergebruiker is een vertrouwde backendrol met toegang tot alle
+   scannerrijen. Bedrijfsscheiding in de scanner gebeurt via `company_id`.
+   Websitegebruikers krijgen hiermee geen extra databasebevoegdheden.
+6. Controleer in `profiles/jan-snel.json` het blok:
+
+   ```json
+   "retrieval": {
+     "first_publication_date": "2026-11-24",
+     "overlap_days": 2,
+     "through": "yesterday"
+   }
+   ```
+
+   Kies bewust de eerste gewenste publicatiedatum. De databasevariant scant
+   volledige kalenderdagen in Europe/Amsterdam, tot en met gisteren. `scan.days`
+   beperkt deze route niet. Gebruik geen aanvullende publicatie-/sluitingsdatum-
+   API-filters in een profiel met `retrieval`; de validator weigert die combinatie.
+7. Commit/push de implementatie en start **Actions → Company Tender Scan** met
+   het profiel `profiles/jan-snel.json`, Environment `jan-snel`,
+   **use_database=true**, en voor de eerste proef **send_email=false**.
+   Inspecteer het artifact `database_run.json`, de publicatierapporten en de
+   tabellen hieronder. Dit kan OpenAI-kosten maken als AI aanstaat.
+
+Optioneel kun je lokaal alleen de verbinding en leesrechten controleren nadat je
+het secret veilig als lokale omgevingsvariabele hebt ingesteld:
+
+```sh
+uv run --locked python database_scan.py --config profiles/jan-snel.json --check-connection
+```
+
+Na een geslaagde proef zet je `use_database: true` in de `with`-sectie van de
+bedrijfsworkflow. Dat schakelt ook de geplande uitvoeringen om. Laat e-mail aan
+of uit via `send_email`. In de databasevariant verstuurt Python de mail met
+SMTP_SSL op poort 465 of STARTTLS op andere poorten; de oude mailactie wordt
+voor die route overgeslagen.
+
+### Opgeslagen voortgang en foutafhandeling
+
+| Tabel in schema `scanner` | Inhoud |
+| --- | --- |
+| `companies` | Eerste ophaaldatum, selectiehash, opgehaald t/m en laatste volledig afgeronde scandag |
+| `runs` | Datumvenster, start/einde, GitHub-link en complete/incomplete/failed-status |
+| `publications` | Publicatie- en documentmetadata, fingerprint, resultaat en retry-status |
+| `notifications` | Unieke GO-resultaten per bedrijf, publicatie en fingerprint; koppeling aan mailbatch |
+| `mail_batches` | Ontvanger, rapportinhoud en prepared/sending/sent-status |
+
+De ophaaldatum schuift pas door nadat alle pagina's én benodigde metadata
+succesvol zijn opgeslagen. Ontbrekende `totalElements`, ongeldige responses,
+dubbele ID's, veranderende aantallen, API-fouten en paginalimieten blokkeren dat.
+Een databasefout leidt tot een mislukte run, nooit tot een stateloze terugval.
+Gedeeltelijk opgeslagen publicaties blijven beschikbaar voor de volgende poging.
+
+Document-/AI-fouten, ontbrekende documenten en ontbrekende leidraden blijven als
+retry staan. Herpogingen hebben oplopende wachttijd (1 tot maximaal 24 uur),
+zonder vaste maximale pogingentelling. Permanente onleesbaarheid kan dus de
+scanstatus onvolledig houden. Deze publicaties moeten handmatig onderzocht worden.
+Een zuivere CPV-/keyword-afwijzing is afgerond. Geldige GO/MAYBE/NO_GO-beoordelingen
+worden opgeslagen. GO's gaan naar de mailwachtrij, ook als mailen tijdens een
+proef uitstaat; later mailen stuurt die nog niet verstuurde GO's alsnog.
+
+De dagelijkse planning controleert of de laatste volledig geslaagde run minstens
+`interval_days` geleden is. Achterstallige scans worden dus dagelijks opnieuw
+geprobeerd; na herstel telt het interval vanaf de succesvolle dag. Een
+sessiegebonden databaselock voorkomt dubbele gelijktijdige runs voor hetzelfde
+bedrijf, ook vanuit verschillende workflows. Een gestopte verbinding geeft deze
+lock automatisch vrij.
+
+De fingerprint omvat publicatiedetails, documentlijst en bedrijfsselectie/prompt.
+Ongewijzigde, afgeronde publicaties worden niet opnieuw geanalyseerd. Wijzig je
+API-filters, inhoudsfilters, prompt, AI-instellingen of eerste ophaaldatum, dan
+begint de databasevariant opnieuw bij `first_publication_date`. Dit kan nieuwe
+AI-kosten en nieuwe rapportages opleveren. Bij gewijzigde documentmetadata wordt
+de publicatie opnieuw verwerkt. Onzichtbare bestandswijzigingen zonder gewijzigde
+metadata worden niet gegarandeerd ontdekt; binaries worden niet onbeperkt in de
+database bewaard. Publicaties die buiten de overlap alsnog zichtbaar worden,
+vereisen een bewuste ruimere hercontrole.
+
+### Mail met onzekere afleverstatus herstellen
+
+SMTP biedt geen gegarandeerde exactly-once-aflevering. Vóór verzending zet de
+scanner de batch op `sending`; pas na acceptatie door SMTP wordt dit `sent`.
+Bij een timeout/crash rond verzending blijft `sending` staan en blokkeert
+automatisch opnieuw mailen. Controleer in de mailproviderlogs of het bericht met
+Message-ID `<tenderscanner-BATCH_ID@tenderscanner.local>` is geaccepteerd.
+Bevestig daarna in de SQL Editor **één van beide** uitkomsten:
+
+```sql
+-- Bericht is aantoonbaar verstuurd:
+UPDATE scanner.mail_batches SET status='sent', sent_at=now()
+WHERE batch_id='CONTROLEER-EERST-DE-ECHTE-BATCH-UUID' AND status='sending';
+
+-- OF: bericht is aantoonbaar niet verstuurd; sta een nieuwe poging toe:
+UPDATE scanner.mail_batches SET status='prepared'
+WHERE batch_id='CONTROLEER-EERST-DE-ECHTE-BATCH-UUID' AND status='sending';
+```
+
+Voer niet beide statements uit. Een voorbereide batch houdt zijn ontvanger vast;
+bij een gewijzigd MAIL_TO moet je die batch eerst bewust controleren/aanpassen.
+
+### Databasevariant testen
+
+De gewone tests gebruiken geen productie-database. De workflow **Scanner Tests**
+start een wegwerp-PostgreSQL 16-database en test migratie, beperkte rechten, locks,
+deduplicatie, retries en mailregistratie. Die workflow is ook handmatig te starten.
+Lokaal worden deze integratietests overgeslagen tenzij `TEST_SCANNER_ADMIN_URL`
+is ingesteld op een expliciet daarvoor bedoelde database met een naam eindigend
+op `_test`. De integratietests wissen het `scanner`-schema in die testdatabase.
+Gebruik dit secret nooit voor een gewone of productie-database.
+
 ## Bedrijfsprofielen en nieuwe Actions-scans
 
 Onderzocht op 24 november 2026. De scanner ondersteunt nu `--config` met een
@@ -53,8 +202,9 @@ bedrijfsprofiel is beschikbaar als `profiles/hob.json` en `prompts/hob.txt`.
    bestaande repository-secrets. Stop secrets en ontvangers niet in profielbestanden.
 6. Commit/push de bestanden. Kies Actions > Company Tender Scan > Run workflow,
    geef het configuratiepad op en kies het Environment. E-mail is standaard uit.
-   Het invulprofiel heeft ook `scan.analyze_openai=false`: zet dit pas op `true`
-   nadat je de prompt hebt ingevuld. Zonder AI zijn er geen AI-GO-resultaten.
+   Bij een nieuw gekopieerd profiel zet je `scan.analyze_openai` pas op `true`
+   nadat je de bedrijfsprompt hebt ingevuld. Bij Jan Snel staat AI inmiddels aan.
+   Zonder AI zijn er geen AI-GO-resultaten.
 
 Een profiel bevat `schema_version`, `id`, `api`, `filters`, `scan`, `prompt_file`.
 De `scan`-opties zijn `days`, `pages`, `throttle`, `zip_max_mb`,
@@ -90,8 +240,8 @@ Nieuwe bedrijfsworkflows kunnen dezelfde dagelijkse trigger en
 aanroep van de herbruikbare workflow. Alleen op een scandag starten de
 documentdownloads, AI-analyse en rapportage; de dagelijkse controle zelf is
 een kleine Actions-job.
-Mailen en AI-analyse staan voor dit profiel nog uit en moeten afzonderlijk
-worden ingeschakeld wanneer gewenst.
+Mailen en AI-analyse staan voor Jan Snel aan. Bij de generieke handmatige
+workflow is mailen standaard uit, zodat je een eerste proef zonder e-mail kunt doen.
 
 Het interval staat in het bedrijfsprofiel, het tijdstip in de bedrijfsworkflow:
 

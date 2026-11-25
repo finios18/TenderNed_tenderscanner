@@ -17,6 +17,10 @@ on:
         description: "Rapport e-mailen naar MAIL_TO uit het gekozen Environment"
         default: false
         type: boolean
+      use_database:
+        description: "Gebruik databasevoortgang (vereist migratie, retrieval-profiel en SCANNER_DATABASE_URL)"
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -32,4 +36,5 @@ jobs:
       config: ${{ inputs.config }}
       environment: ${{ inputs.environment }}
       send_email: ${{ inputs.send_email }}
+      use_database: ${{ inputs.use_database }}
     secrets: inherit

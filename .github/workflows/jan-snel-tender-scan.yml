@@ -2,6 +2,11 @@ name: Jan Snel Tender Scan
 
 on:
   workflow_dispatch:
+    inputs:
+      use_database:
+        description: "Database-proef: vereist uitgevoerde migratie en SCANNER_DATABASE_URL"
+        type: boolean
+        default: false
   # Controleer dagelijks; het bedrijfsprofiel bepaalt welke dagen echt scannen.
   schedule:
     - cron: "15 7 * * *"
@@ -22,4 +27,6 @@ jobs:
       environment: jan-snel
       send_email: true
       respect_schedule: ${{ github.event_name == 'schedule' }}
+      # Scheduled runs remain on the legacy route until a database trial succeeds.
+      use_database: ${{ inputs.use_database == true }}
     secrets: inherit

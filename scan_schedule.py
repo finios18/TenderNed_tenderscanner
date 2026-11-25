@@ -22,7 +22,9 @@ def main():
     today = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     if scheduled and "schedule" not in config:
         parser.error("Geplande scans vereisen een schedule-blok in het bedrijfsprofiel")
-    due = is_due(config["schedule"], today) if scheduled else True
+    database_mode = os.environ.get("USE_DATABASE", "false").lower() == "true"
+    # Persistent route checks overdue work against the database, not calendar modulo.
+    due = True if database_mode else is_due(config["schedule"], today) if scheduled else True
     result = f"run_scan={str(due).lower()}\n"
     print(f"{config['id']}: {today}, {result.strip()}, terugkijkperiode={config['scan']['days']} dagen")
     if os.environ.get("GITHUB_OUTPUT"):

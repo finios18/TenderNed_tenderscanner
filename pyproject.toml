@@ -12,6 +12,7 @@ dependencies = [
     "pdfminer.six",
     "openai",
     "tzdata; sys_platform == 'win32'",
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [tool.uv]

@@ -51,7 +51,7 @@ def load_config(path):
     config = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(config, dict):
         raise ValueError("Configuratie moet een JSON-object zijn")
-    unknown = set(config) - {"schema_version", "id", "api", "filters", "scan", "prompt_file", "schedule"}
+    unknown = set(config) - {"schema_version", "id", "api", "filters", "scan", "prompt_file", "schedule", "retrieval"}
     if unknown:
         raise ValueError(f"Onbekende configuratiesleutels: {sorted(unknown)}")
     if config.get("schema_version") != 1:
@@ -107,6 +107,20 @@ def load_config(path):
         schedule = validate_schedule(config["schedule"])
         # Keep at least one calendar day of overlap for the configured interval.
         scan["days"] = max(scan["days"], schedule["interval_days"] + 1)
+    if "retrieval" in config:
+        retrieval = config["retrieval"]
+        if not isinstance(retrieval, dict) or set(retrieval) != {"first_publication_date", "overlap_days", "through"}:
+            raise ValueError("retrieval: gebruik first_publication_date, overlap_days en through")
+        if not isinstance(retrieval["first_publication_date"], str):
+            raise ValueError("retrieval.first_publication_date: verwacht YYYY-MM-DD")
+        date.fromisoformat(retrieval["first_publication_date"])
+        if type(retrieval["overlap_days"]) is not int or not 0 <= retrieval["overlap_days"] <= 30:
+            raise ValueError("retrieval.overlap_days: kies 0 t/m 30 dagen")
+        if retrieval["through"] != "yesterday":
+            raise ValueError("retrieval.through: alleen yesterday wordt ondersteund")
+        if any(api.get(key) for key in ("publicatieDatumPreset", "publicatieDatumVanaf", "publicatieDatumTot",
+                                       "sluitingsDatumPreset", "sluitingsDatumVanaf", "sluitingsDatumTot")):
+            raise ValueError("retrieval beheert het datumvenster; verwijder API-publicatie- en sluitingsdatumfilters")
     if "openai_model" in scan and (not isinstance(scan["openai_model"], str) or not scan["openai_model"].strip()):
         raise ValueError("scan.openai_model: verwacht een modelnaam")
     prompt = config.get("prompt_file")

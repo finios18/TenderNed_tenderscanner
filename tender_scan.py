@@ -1010,7 +1010,8 @@ def _replace_path_prefix(value, old_prefix: str, new_prefix: str):
 # ==== Core ====
 def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_downloads",
                 throttle_s=0.25, zip_max_mb=200, zip_follow_nested=False,
-                analyze_openai=False, openai_model=OPENAI_MODEL_DEFAULT):
+                analyze_openai=False, openai_model=OPENAI_MODEL_DEFAULT,
+                publication_items=None, detail_loader=None, documents_loader=None):
     """Scan TenderNed publicaties in de laatste N dagen.
 
     Robuustheid:
@@ -1042,9 +1043,9 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
     cpv_missing = 0
 
     try:
-        for page in range(max_pages):
+        for page in range(1 if publication_items is not None else max_pages):
             t_page = time.monotonic()
-            data = fetch_list_page(page=page, size=50)
+            data = {"content": publication_items} if publication_items is not None else fetch_list_page(page=page, size=50)
             items = data.get("content") or data.get("items") or []
             if not items:
                 break
@@ -1058,7 +1059,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
             for it in items:
                 pid = it.get("publicatieId") or it.get("id")
                 pdt = it.get("publicatieDatum") or it.get("datum") or it.get("publicationDate")
-                if not within_last_days(pdt, days_back=days_back):
+                if publication_items is None and not within_last_days(pdt, days_back=days_back):
                     record_skip("outside_date_window_or_invalid_date", pid, it.get("aanbestedingNaam", ""),
                                 detail=str(pdt or "Publicatiedatum ontbreekt"))
                     continue
@@ -1068,7 +1069,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
                 # detail ophalen voor rijkere velden + CPV
                 t_detail = time.monotonic()
-                detail = fetch_detail(pid)
+                detail = detail_loader(pid) if detail_loader is not None else fetch_detail(pid)
                 dur_detail = time.monotonic() - t_detail
                 if dur_detail >= SLOW_STEP_S and VERBOSE_STEPS:
                     log(f"[SLOW DETAIL] {pid} {_fmt_dur(dur_detail)}")
@@ -1099,7 +1100,7 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
 
                 # Documenten ophalen
                 t_docs = time.monotonic()
-                docs = fetch_documents(pid)
+                docs = documents_loader(pid) if documents_loader is not None else fetch_documents(pid)
                 dur_docs = time.monotonic() - t_docs
                 if dur_docs >= SLOW_STEP_S and VERBOSE_STEPS:
                     log(f"[SLOW DOCS] {pid} {_fmt_dur(dur_docs)}")
@@ -1402,7 +1403,8 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
                 break
 
         else:
-            record_skip("page_limit_reached", detail=f"Maximaal {max_pages} pagina's opgehaald; eventuele volgende pagina's niet gescand")
+            if publication_items is None:
+                record_skip("page_limit_reached", detail=f"Maximaal {max_pages} pagina's opgehaald; eventuele volgende pagina's niet gescand")
 
     finally:
         # Zorg dat het worker-process altijd netjes wordt afgesloten.
@@ -1502,6 +1504,9 @@ def scan_recent(days_back=DAYS_BACK_DEFAULT, max_pages=10, download_dir="recent_
             print("- ❌ Geen GO's gegeven door OpenAI.")
 
 
+    return {"results": list(openai_results_by_publication.values()), "events": list(SKIP_EVENTS)}
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Scan laatste N dagen; CPV uit list+detail; lees PDF/DOCX, ook in ZIP; zoek keywords; optioneel OpenAI-analyse op leidraad."
@@ -1532,7 +1537,7 @@ def main():
         ap.set_defaults(**config["scan"])
         args = ap.parse_args()
 
-    return scan_recent(
+    scan_recent(
         days_back=args.days,
         max_pages=args.pages,
         download_dir=args.download_dir,
@@ -1542,6 +1547,7 @@ def main():
         analyze_openai=args.analyze_openai,
         openai_model=args.openai_model,
     )
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main() or 0)
