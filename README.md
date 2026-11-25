@@ -2,10 +2,11 @@
 
 ## Databasevoortgang instellen (nieuwe, optionele route)
 
-De databasevariant is voorbereid, maar **niet ingeschakeld voor geplande scans**.
-De bestaande zondagscan en de huidige Jan Snel-planning blijven stateloos werken
-totdat een databaseproef is geslaagd. Er zijn geen Supabase-tabellen of secrets
-automatisch aangemaakt.
+De Jan Snel-workflow gebruikt na de geslaagde databaseproef **de databasevariant**,
+zowel handmatig als gepland. De bestaande zondagscan blijft de stateloze route
+gebruiken. De generieke Company Tender Scan laat je zelf de route kiezen.
+Voor een volgend bedrijf moeten database en secrets vooraf zijn ingericht;
+de scanner maakt geen Supabase-projecten, tabellen of secrets automatisch aan.
 
 ### Eenmalige inrichting in Supabase en GitHub
 
