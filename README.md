@@ -122,15 +122,51 @@ sessiegebonden databaselock voorkomt dubbele gelijktijdige runs voor hetzelfde
 bedrijf, ook vanuit verschillende workflows. Een gestopte verbinding geeft deze
 lock automatisch vrij.
 
-De fingerprint omvat publicatiedetails, documentlijst en bedrijfsselectie/prompt.
-Ongewijzigde, afgeronde publicaties worden niet opnieuw geanalyseerd. Wijzig je
-API-filters, inhoudsfilters, prompt, AI-instellingen of eerste ophaaldatum, dan
-begint de databasevariant opnieuw bij `first_publication_date`. Dit kan nieuwe
-AI-kosten en nieuwe rapportages opleveren. Bij gewijzigde documentmetadata wordt
-de publicatie opnieuw verwerkt. Onzichtbare bestandswijzigingen zonder gewijzigde
-metadata worden niet gegarandeerd ontdekt; binaries worden niet onbeperkt in de
-database bewaard. Publicaties die buiten de overlap alsnog zichtbaar worden,
-vereisen een bewuste ruimere hercontrole.
+### Hoe herkent de scanner gewijzigde publicaties?
+
+De scanner bewaart per bedrijf en publicatie een **digitale vingerafdruk**
+(SHA-256-hash). Die wordt berekend over de gegevens uit de TenderNed-publicatielijst,
+de publicatiedetails, de documentlijst en de bedrijfsselectie. De bedrijfsselectie
+omvat onder andere API-filters, CPV-codes, documentzoekwoorden, prompt, model,
+AI-aan/uit, ZIP-instellingen en de centrale leidraadtitels.
+De documentlijst wordt opgehaald voor publicaties die door de lokale CPV-selectie
+komen; CPV-afgewezen publicaties krijgen deze extra documentaanroep niet.
+
+Bij opnieuw ophalen vergelijkt de scanner de nieuwe vingerafdruk met de waarde
+in `scanner.publications`:
+
+| Situatie | Wat gebeurt er? |
+| --- | --- |
+| Vingerafdruk gelijk, eerdere verwerking afgerond | Geen nieuwe documentverwerking of AI-analyse; hetzelfde GO-resultaat wordt niet opnieuw klaargezet voor e-mail |
+| Vingerafdruk veranderd | Eerder resultaat wordt gewist voor de nieuwe verwerking en de publicatie gaat opnieuw naar de wachtrij; na selectie kan opnieuw een AI-aanroep volgen |
+| Vingerafdruk gelijk, eerdere verwerking mislukt | Publicatie blijft in de retry-wachtrij en wordt na de ingestelde wachttijd opnieuw geprobeerd |
+
+Bijvoorbeeld: een gewijzigd veld in de publicatiedetails of een nieuw document
+in de documentlijst verandert de vingerafdruk. Ook een gewijzigde documentnaam,
+downloadlink, grootte of datum verandert de vingerafdruk als TenderNed die wijziging
+in de meegestuurde metadata zichtbaar maakt. Een metadatawijziging hoeft geen
+inhoudelijke wijziging te zijn; zij kan toch nieuwe verwerking veroorzaken.
+Een opnieuw beoordeelde versie die GO krijgt, kan opnieuw worden gemaild: de
+mailregistratie geldt per bedrijf, publicatie en vingerafdruk.
+
+**De scanner vergelijkt niet de volledige inhoud van alle bestanden.** Een PDF
+die wordt vervangen terwijl de meegestuurde publicatie- en documentmetadata
+gelijk blijven, wordt daardoor niet gegarandeerd als gewijzigd herkend.
+
+**De vergelijking gebeurt alleen bij publicaties die opnieuw worden opgehaald.**
+De normale ophaalperiode loopt vanaf het opgeslagen eindpunt met
+`retrieval.overlap_days` overlap tot en met gisteren. Een oudere publicatie buiten
+die periode wordt niet automatisch opnieuw gecontroleerd, tenzij zij nog op
+herverwerking wacht. Een nieuw gepubliceerde rectificatie kan wel in de selectie
+vallen, mits zij binnen het datumvenster en de API-filters valt. De scanner
+controleert niet automatisch alle gerelateerde oude publicaties.
+
+Wijzig je API-filters, inhoudsfilters, prompt, AI-instellingen of eerste
+ophaaldatum, dan begint de databasevariant opnieuw bij `first_publication_date`.
+Dit kan nieuwe AI-kosten en nieuwe rapportages opleveren. Voor publicaties die
+pas buiten de overlap zichtbaar worden of later wijzigen, is een bewuste ruimere
+hercontrole nodig. De overlap en vingerafdruk verminderen gemiste wijzigingen en
+dubbel werk, maar garanderen niet dat iedere wijziging wordt ontdekt.
 
 ### Mail met onzekere afleverstatus herstellen
 
