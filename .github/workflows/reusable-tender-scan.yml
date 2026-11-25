@@ -17,7 +17,7 @@ on:
         default: false
       use_database:
         type: boolean
-        default: false
+        default: true
       check_database_only:
         type: boolean
         default: false

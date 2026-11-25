@@ -2,9 +2,10 @@
 
 ## Databasevoortgang instellen (nieuwe, optionele route)
 
-De Jan Snel-workflow gebruikt na de geslaagde databaseproef **de databasevariant**,
-zowel handmatig als gepland. De bestaande zondagscan blijft de stateloze route
-gebruiken. De generieke Company Tender Scan laat je zelf de route kiezen.
+Alle bedrijfsworkflows gebruiken standaard **de databasevariant**, zowel
+handmatig als gepland. Dit geldt voor Jan Snel, Weekly Tender Scan (HoB) en
+Company Tender Scan. De generieke workflow heeft geen database-aan/uitkeuze
+meer; `check_database_only` blijft beschikbaar voor verbindingstests.
 Voor een volgend bedrijf moeten database en secrets vooraf zijn ingericht;
 de scanner maakt geen Supabase-projecten, tabellen of secrets automatisch aan.
 
@@ -60,7 +61,7 @@ de scanner maakt geen Supabase-projecten, tabellen of secrets automatisch aan.
    API-filters in een profiel met `retrieval`; de validator weigert die combinatie.
 7. Commit/push de implementatie en start **Actions → Company Tender Scan** met
    het profiel `profiles/jan-snel.json`, Environment `jan-snel`,
-   **use_database=true**, en voor de eerste proef **send_email=false**.
+   en voor de eerste proef **send_email=false**. De database staat standaard aan.
    Inspecteer het artifact `database_run.json`, de publicatierapporten en de
    tabellen hieronder. Dit kan OpenAI-kosten maken als AI aanstaat.
 
@@ -82,9 +83,9 @@ Controleer bij `DB_AUTH` het wachtwoord van `scanner_worker`, bij
 `DB_PROJECT` de combinatie projectreferentie/poolerhost en bij `DB_USER`
 het gebruikersformaat `scanner_worker.PROJECT_REF`.
 
-Na een geslaagde proef zet je `use_database: true` in de `with`-sectie van de
-bedrijfsworkflow. Dat schakelt ook de geplande uitvoeringen om. Laat e-mail aan
-of uit via `send_email`. In de databasevariant verstuurt Python de mail met
+Nieuwe bedrijfsworkflows gebruiken standaard de database. Geef bij geplande
+scans ook `respect_schedule: ${{ github.event_name == 'schedule' }}` mee.
+Laat e-mail aan of uit via `send_email`. In de databasevariant verstuurt Python de mail met
 SMTP_SSL op poort 465 of STARTTLS op andere poorten; de oude mailactie wordt
 voor die route overgeslagen.
 
@@ -112,9 +113,11 @@ Een zuivere CPV-/keyword-afwijzing is afgerond. Geldige GO/MAYBE/NO_GO-beoordeli
 worden opgeslagen. GO's gaan naar de mailwachtrij, ook als mailen tijdens een
 proef uitstaat; later mailen stuurt die nog niet verstuurde GO's alsnog.
 
-De dagelijkse planning controleert of de laatste volledig geslaagde run minstens
-`interval_days` geleden is. Achterstallige scans worden dus dagelijks opnieuw
-geprobeerd; na herstel telt het interval vanaf de succesvolle dag. Een
+De dagelijkse planning bepaalt het meest recente geplande moment vanaf
+`start_date`, met stappen van `interval_days`. Als dat moment nog niet succesvol
+is afgehandeld, wordt gescand. Achterstallige scans worden dagelijks opnieuw
+geprobeerd. Een herstelrun op maandag verschuift de volgende zondagscan niet;
+ook een handmatige uitvoering verschuift het ingestelde ritme niet. Een
 sessiegebonden databaselock voorkomt dubbele gelijktijdige runs voor hetzelfde
 bedrijf, ook vanuit verschillende workflows. Een gestopte verbinding geeft deze
 lock automatisch vrij.
@@ -245,8 +248,9 @@ wordt gecontroleerd of het bedrijf aan de beurt is. Het bedrijfsprofiel blijft
 daarna volgen startdatum + N dagen, + 2N dagen, enzovoort. Bij 7 dagen bepaalt
 de startdatum dus de weekdag. `enabled: false` schakelt geplande scans uit.
 Handmatig starten omzeilt de planning. Jan Snel staat standaard op dagelijks (1).
-De scanner gebruikt automatisch minstens `interval_days + 1` terugkijkdagen;
-een ruimere `scan.days` blijft behouden. Expliciete CLI-opties kunnen dit overrulen.
+De databasevariant haalt vanaf het opgeslagen eindpunt opnieuw op met
+`retrieval.overlap_days` overlap, tot en met gisteren. `scan.days` is alleen
+nog van toepassing bij rechtstreeks gebruik van de oude `tender_scan.py`-CLI.
 Nieuwe bedrijfsworkflows kunnen dezelfde dagelijkse trigger en
 `respect_schedule: ${{ github.event_name == 'schedule' }}` gebruiken bij de
 aanroep van de herbruikbare workflow. Alleen op een scandag starten de
@@ -257,29 +261,27 @@ workflow is mailen standaard uit, zodat je een eerste proef zonder e-mail kunt d
 
 Het interval staat in het bedrijfsprofiel, het tijdstip in de bedrijfsworkflow:
 
-| Gewenste frequentie | Planning | Aanbevolen terugkijkperiode met overlap |
+| Gewenste frequentie | Planning | Overlap bovenop opgeslagen voortgang |
 | --- | --- | --- |
-| Dagelijks | Dagelijkse cron | 2 dagen |
-| Iedere 2 dagen | Dagelijkse trigger plus profielinterval 2 | 3 dagen |
-| Iedere 3 dagen | Dagelijkse trigger plus profielinterval 3 | 4 dagen |
-| Wekelijks | Cron met vaste weekdag | 8 dagen |
-| Iedere 14 dagen | Dagelijkse trigger plus profielinterval 14 | 15 dagen |
+| Dagelijks | Dagelijkse controle plus profielinterval 1 | 2 dagen |
+| Iedere 2 dagen | Dagelijkse controle plus profielinterval 2 | 2 dagen |
+| Iedere 3 dagen | Dagelijkse controle plus profielinterval 3 | 2 dagen |
+| Wekelijks | Dagelijkse controle plus profielinterval 7, startdatum op gewenste weekdag | 2 dagen |
+| Iedere 14 dagen | Dagelijkse controle plus profielinterval 14 | 2 dagen |
 
 De intervalcontrole werkt over maand- en jaargrenzen heen. Gebruik hiervoor
 geen `*/2`, `*/3` of `*/14` in het dag-van-de-maandveld: dit begint bij iedere
 nieuwe maand opnieuw en vormt geen doorlopend interval. De frequentie uit de
 website-export moet momenteel handmatig worden overgenomen als `interval_days`.
 Een profielwijziging wijzigt de effectieve scandagen, niet de dagelijkse cron.
-Gemiste of mislukte scandagen worden nog niet automatisch ingehaald; hiervoor
-is blijvende opslag van de laatste succesvolle scan nodig.
+De databasevoortgang zorgt dat gemiste/mislukte perioden worden ingehaald.
 
 GitHub ondersteunt `timezone: Europe/Amsterdam` naast `cron` zodat een gekozen
 Nederlandse tijd ook bij zomer-/wintertijd gelijk blijft. Zonder `timezone`
-geldt UTC, zoals bij de bestaande wekelijkse scan. Zie de
+geldt UTC. Zie de
 [officiële schedule-documentatie](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 Geplande uitvoeringen kunnen vertraagd starten; cron is geen garantie voor een
-exact begintijdstip. Zonder blijvende deduplicatie kan overlap dubbele resultaten
-opleveren.
+exact begintijdstip. De databasevariant dedupliceert afgeronde publicaties.
 
 De handmatige workflow is al toegevoegd. Voor een eigen planning maak je een
 klein bestand in `.github/workflows/` dat de gedeelde workflow aanroept:
@@ -289,7 +291,8 @@ name: Scan Mijn Bedrijf
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "15 7 * * *"
+      timezone: Europe/Amsterdam
 permissions:
   contents: read
 concurrency:
@@ -302,16 +305,22 @@ jobs:
       config: profiles/mijn-bedrijf.json
       environment: mijn-bedrijf
       send_email: true
+      respect_schedule: ${{ github.event_name == 'schedule' }}
+      use_database: true
     secrets: inherit
 ```
 
-De cron hierboven draait maandag om 06:00 UTC (07:00 Nederlandse wintertijd,
-08:00 zomertijd). Kies een terugkijkperiode die minstens de scanfrequentie
-dekt, liefst met overlap. Er is nog geen blijvende deduplicatie tussen runs:
-overlap kan dezelfde tender opnieuw analyseren en mailen. Elke job heeft een
+De cron hierboven controleert dagelijks om 07:15 Nederlandse tijd of het
+bedrijf aan de beurt is. Vul in ieder profiel `schedule` en `retrieval` in.
+Elke job heeft een
 eigen runner en het artifact krijgt het Environment in zijn naam. Infrastructuur,
 documentverwerking en e-mailopmaak worden gedeeld via de herbruikbare workflow.
-De workflows zijn lokaal toegevoegd; ze zijn nog niet naar GitHub gepusht of uitgevoerd.
+HoB staat op zondag met startdatum 29 november 2026, dagelijkse controle om 02:15,
+eerste ophaaldatum 21 november 2026 en twee dagen overlap. Bij de eerste run
+wordt die initiële periode opnieuw beoordeeld; eerdere stateloze beoordelingen
+zijn niet automatisch in de database geïmporteerd. HoB gebruikt Environment
+`hob` en valt voor ontbrekende Environment-secrets terug op repository-secrets,
+inclusief de bestaande `MAIL_TO`. Een eigen `MAIL_TO` kan later in `hob` worden gezet.
 
 ### Onderzoek: TenderNed PAPI
 

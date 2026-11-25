@@ -47,6 +47,18 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(db.digest({"a": 1, "b": 2}), db.digest({"b": 2, "a": 1}))
         self.assertNotEqual(db.digest({"a": 1}), db.digest({"a": 2}))
 
+    def test_weekly_recovery_preserves_sunday_and_manual_run_does_not_shift_it(self):
+        config = {"schedule": {"enabled": True, "interval_days": 7, "start_date": "2026-11-22"}}
+        state = {"last_completed_day": date(2026, 11, 22)}
+        self.assertFalse(db.is_due(config, state, date(2026, 11, 28)))
+        self.assertTrue(db.is_due(config, state, date(2026, 11, 29)))
+        self.assertTrue(db.is_due(config, state, date(2026, 11, 30)))
+        state["last_completed_day"] = date(2026, 11, 30)
+        self.assertFalse(db.is_due(config, state, date(2026, 12, 5)))
+        self.assertTrue(db.is_due(config, state, date(2026, 12, 6)))
+        state["last_completed_day"] = date(2026, 12, 2)
+        self.assertTrue(db.is_due(config, state, date(2026, 12, 6)))
+
 
 class RetrievalTests(unittest.TestCase):
     def retrieve(self, scanner, pages=3):

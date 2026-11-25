@@ -41,7 +41,12 @@ def is_due(config, state, today):
     schedule = config["schedule"]
     start = date.fromisoformat(schedule["start_date"])
     last = state["last_completed_day"]
-    return schedule["enabled"] and today >= start and (last is None or today >= last + timedelta(days=schedule["interval_days"]))
+    if not schedule["enabled"] or today < start:
+        return False
+    interval = schedule["interval_days"]
+    current_slot = start + timedelta(days=((today - start).days // interval) * interval)
+    # Retry missed slots without shifting the next regular scan day.
+    return last is None or last < current_slot
 
 
 def strict_json(scanner, url, params=None):

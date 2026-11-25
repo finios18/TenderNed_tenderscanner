@@ -84,5 +84,15 @@
     "pages": 1000,
     "analyze_openai": true
   },
-  "prompt_file": "../prompts/hob.txt"
+  "prompt_file": "../prompts/hob.txt",
+  "schedule": {
+    "enabled": true,
+    "interval_days": 7,
+    "start_date": "2026-11-29"
+  },
+  "retrieval": {
+    "first_publication_date": "2026-11-21",
+    "overlap_days": 2,
+    "through": "yesterday"
+  }
 }

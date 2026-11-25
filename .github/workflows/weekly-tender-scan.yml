@@ -2,67 +2,25 @@ name: Weekly Tender Scan
 
 on:
   workflow_dispatch:
-
+  # Dagelijkse controle voor herstel; profiles/hob.json bepaalt het zondagritme.
   schedule:
-    - cron: "0 1 * * 0"
+    - cron: "15 2 * * *"
+      timezone: Europe/Amsterdam
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-scan-hob
+  cancel-in-progress: false
 
 jobs:
-  tender-scan:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.10.3"
-          python-version: "3.11"
-          enable-cache: true
-
-      - name: Install dependencies
-        run: |
-          uv sync --locked
-
-      - name: Run offline tests
-        run: uv run --locked python -m unittest discover -s tests -v
-
-      - name: Run tender scan
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          uv run --locked python tender_scan.py \
-            --days 8 \
-            --pages 1000 \
-            --download_dir recent_downloads \
-            --analyze_openai
-
-      - name: Create mail summary
-        id: mail_summary
-        run: |
-          uv run --locked python go_mail_report.py \
-            --results recent_downloads/current_scan_results.json \
-            --output_dir recent_downloads \
-            --run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tender-results
-          path: recent_downloads/
-
-      - name: Send tender email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: ${{ steps.mail_summary.outputs.subject }}
-          to: ${{ secrets.MAIL_TO }}
-          from: Tender Bot <${{ secrets.SMTP_USERNAME }}>
-          secure: true
-          body: file://recent_downloads/mail_summary.txt
-          attachments: ${{ steps.mail_summary.outputs.attachments }}
+  scan:
+    uses: ./.github/workflows/reusable-tender-scan.yml
+    with:
+      config: profiles/hob.json
+      environment: hob
+      send_email: true
+      respect_schedule: ${{ github.event_name == 'schedule' }}
+      use_database: true
+    secrets: inherit

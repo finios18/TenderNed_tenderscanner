@@ -17,10 +17,6 @@ on:
         description: "Rapport e-mailen naar MAIL_TO uit het gekozen Environment"
         default: false
         type: boolean
-      use_database:
-        description: "Gebruik databasevoortgang (vereist migratie, retrieval-profiel en SCANNER_DATABASE_URL)"
-        default: false
-        type: boolean
       check_database_only:
         description: "Alleen databaseverbinding controleren; geen tenders, AI of e-mail"
         default: false
@@ -40,6 +36,6 @@ jobs:
       config: ${{ inputs.config }}
       environment: ${{ inputs.environment }}
       send_email: ${{ inputs.send_email }}
-      use_database: ${{ inputs.use_database || inputs.check_database_only }}
+      use_database: true
       check_database_only: ${{ inputs.check_database_only }}
     secrets: inherit
