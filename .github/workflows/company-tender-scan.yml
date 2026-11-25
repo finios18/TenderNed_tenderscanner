@@ -1,0 +1,35 @@
+name: Company Tender Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Bedrijfsconfiguratie (bijvoorbeeld profiles/jan-snel.json)"
+        required: true
+        default: profiles/jan-snel.json
+        type: string
+      environment:
+        description: "GitHub Environment met de secrets voor dit bedrijf"
+        required: true
+        default: jan-snel
+        type: environment
+      send_email:
+        description: "Rapport e-mailen naar MAIL_TO uit het gekozen Environment"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-scan-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    uses: ./.github/workflows/reusable-tender-scan.yml
+    with:
+      config: ${{ inputs.config }}
+      environment: ${{ inputs.environment }}
+      send_email: ${{ inputs.send_email }}
+    secrets: inherit

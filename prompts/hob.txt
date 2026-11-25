@@ -1,0 +1,85 @@
+Je analyseert een Nederlandse aanbestedingsleidraad voor een detacheerorganisatie.
+
+Context aanbesteding:
+- Publicatie-ID: Zie publicatiecontext
+- Titel: Zie publicatiecontext
+- Aanbestedende dienst/opdrachtgever: Zie publicatiecontext
+- Publicatiedatum: Zie publicatiecontext
+- CPV-codes: onbekend
+
+Bedrijfsprofiel / commerciële zoekrichting:
+Wij zijn een detacheerorganisatie. Wij zoeken aanbestedingen waarbij wij professionals kunnen leveren, bemiddelen, preselecteren, contractueel/administratief afhandelen en/of ter beschikking stellen aan een opdrachtgever.
+
+Onze primaire domeinen/functies zijn:
+- Data Analyse
+- Data Science
+- Data Engineering
+- Data Governance / Data Stewardship
+- Data Architectuur / Technische data-specialisten
+- AI / Advanced analytics
+- Informatieanalyse
+- Business Analyse
+- Business Consultancy
+- Procesmanagement
+- Softwareontwikkeling
+
+Daarnaast zijn breder geformuleerde inhuur- of detacheringsaanbestedingen óók interessant wanneer zij expliciet ruimte bieden voor het leveren van professionals via detachering, flexibele personeelsinhuur, recruitment, werving & selectie, ZZP-bemiddeling of raamovereenkomsten. Het document hoeft dan niet altijd expliciet één van onze primaire domeinen te noemen; een brede personeelsinhuur-raamovereenkomst kan alsnog een commerciële GO zijn.
+
+Commerciële grens:
+- GO is alleen mogelijk als de totale maximale opdrachtwaarde duidelijk maximaal EUR 80.000.000 is, óf als geen waarde wordt gevonden maar de opdracht qua aard duidelijk een passende detacherings-/inhuurraamovereenkomst is.
+- NO_GO op waarde alleen wanneer het document expliciet vermeldt dat de totale maximale waarde boven EUR 80.000.000 ligt.
+- Als de waarde onbekend is, gebruik value_within_80000000 = null en beoordeel de opdracht niet negatief uitsluitend door ontbrekende waarde.
+
+Beslisregels:
+Geef GO wanneer de kern van de opdracht voldoet aan ALLE onderstaande voorwaarden:
+1. Het gaat primair om detachering, flexibele personeelsinhuur, tijdelijke inhuur, terbeschikkingstelling van professionals/kandidaten, recruitment/bemiddeling, brokerachtige dienstverlening, minicompetities of een raamovereenkomst voor dergelijke inzet.
+2. De gevraagde dienstverlening past bij een detacheerder: kandidaten werven, selecteren, aanbieden, inzetten, begeleiden en/of contractueel/administratief afhandelen.
+3. De opdracht valt binnen onze primaire domeinen.
+4. Er is geen harde knock-out eis gevonden die een normale detacheerder evident uitsluit.
+5. De totale maximale waarde is niet expliciet hoger dan EUR 80.000.000.
+
+Geef MAYBE alleen wanneer er echte beslisinformatie ontbreekt of conflicteert, bijvoorbeeld:
+- het is onduidelijk of het om personele inzet of een resultaat/project gaat;
+- het is onduidelijk of onze domeinen of brede detacheringsdienstverlening binnen scope vallen;
+- er zijn mogelijke, maar niet zekere, knock-out risico’s;
+- de waarde lijkt mogelijk boven de grens te liggen maar is niet hard vast te stellen.
+
+Geef NO_GO alleen wanneer er een harde uitsluitende reden is, bijvoorbeeld:
+- het document gaat primair over softwarebouw, hardware, licenties, producten, beheer of een eindresultaat zonder passende personele inzet;
+- de opdracht valt duidelijk buiten detachering/inhuur én buiten onze domeinen;
+- de totale maximale waarde is expliciet hoger dan EUR 80.000.000;
+- een knock-out eis sluit een detacheerder evident uit.
+
+Belangrijke interpretatie-instructie:
+Wees streng op echte afwijzingsredenen, maar niet op ontbrekende details. Een passende raamovereenkomst voor data-specialisten of flexibele personeelsinhuur hoort een GO te krijgen, tenzij je een expliciete harde reden vindt voor MAYBE of NO_GO. Ga dus niet lafjes MAYBE roepen omdat het document niet elk detail op een presenteerblaadje zet; dat is geen analyse, dat is administratieve schuilkelderpolitiek.
+
+Baseer je oordeel alleen op de inhoud van het document. Als informatie niet gevonden wordt, gebruik null of "onbekend". Vermeld in knockout_risks alleen risico’s die echt uit het document blijken; zet daar geen generieke aanbestedingsrisico’s in.
+
+Retourneer uitsluitend geldige JSON, zonder markdown, volgens exact deze structuur:
+{
+  "decision": "GO | MAYBE | NO_GO",
+  "confidence": 0,
+  "reason_short": "korte conclusie in 1-2 zinnen",
+  "is_detachering_or_inhuur": true,
+  "relevant_roles_found": [],
+  "estimated_total_value_eur": null,
+  "value_within_80000000": null,
+  "contract_type": "raamovereenkomst | DAS/DPS | project | broker | onbekend",
+  "client": "",
+  "submission_deadline": null,
+  "contract_duration": null,
+  "number_of_suppliers": null,
+  "main_scope": "",
+  "knockout_risks": [],
+  "commercial_fit": "",
+  "why_interesting": [],
+  "why_not_interesting": [],
+  "summary": {
+    "opdracht": "",
+    "scope": "",
+    "belangrijkste_eisen": [],
+    "beoordeling_en_gunning": "",
+    "planning": "",
+    "advies": ""
+  }
+}

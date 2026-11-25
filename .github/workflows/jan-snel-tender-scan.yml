@@ -1,0 +1,25 @@
+name: Jan Snel Tender Scan
+
+on:
+  workflow_dispatch:
+  # Controleer dagelijks; het bedrijfsprofiel bepaalt welke dagen echt scannen.
+  schedule:
+    - cron: "15 7 * * *"
+      timezone: Europe/Amsterdam
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-scan-jan-snel
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    uses: ./.github/workflows/reusable-tender-scan.yml
+    with:
+      config: profiles/jan-snel.json
+      environment: jan-snel
+      send_email: true
+      respect_schedule: ${{ github.event_name == 'schedule' }}
+    secrets: inherit

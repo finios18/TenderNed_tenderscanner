@@ -1,5 +1,261 @@
 # TenderNed Data & Detachering Tender Scanner
 
+## Bedrijfsprofielen en nieuwe Actions-scans
+
+Onderzocht op 24 november 2026. De scanner ondersteunt nu `--config` met een
+apart JSON-profiel en een los promptbestand per bedrijf. De bestaande
+`weekly-tender-scan.yml` blijft zijn huidige instellingen gebruiken. Hetzelfde
+bedrijfsprofiel is beschikbaar als `profiles/hob.json` en `prompts/hob.txt`.
+
+### Nieuwe scan zelf invullen
+
+1. Kopieer `profiles/jan-snel.json` en `prompts/jan-snel.txt` naar een
+   eigen bedrijfsnaam. Pas `id` en `prompt_file` aan. Het promptpad is relatief
+   aan het JSON-bestand.
+2. Vul in `api` de TenderNed-filters in. Vul in `filters` de CPV-whitelist,
+   documentzoekwoorden in. Leidraadtitels en hun prioriteit staan voor alle
+   bedrijven centraal in `AANBESTEDING_KEYWORDS` in `tender_scan.py`.
+   De drie filtergroepen `publicatieType`, `typeOpdracht` en
+   `nationaalOfEuropees` gebruiken per code `true`/`false`, bijvoorbeeld:
+
+   ```json
+   "publicatieType": {
+     "MAC": false,
+     "VAK": true,
+     "AAO": true,
+     "REC": true,
+     "AGO": false,
+     "AAW": false
+   }
+   ```
+
+   Alleen codes met `true` worden meegestuurd. Als binnen een groep alles
+   `false` is, wordt die parameter weggelaten: alle opties zijn dan mogelijk.
+   Codes worden niet automatisch toegevoegd; ook VBE is alleen actief als je
+   expliciet `"VBE": true` toevoegt. De overige meerkeuzefilters gebruiken lijsten.
+   Lege API-lijsten betekenen geen beperking; lokale CPV- en zoekwoordenlijsten
+   moeten gevuld zijn. CPV-match is exact op acht cijfers, geen automatische
+   subcode-uitbreiding. Zoekwoorden werken als OF, hoofdletterongevoelig.
+3. Vul het promptbestand met bedrijfsprofiel, gewenste opdrachten, waardegrenzen
+   en beslisregels. Behoud het JSON-antwoordmodel voor de rapportgenerator.
+   De velden `is_detachering_or_inhuur` en `value_within_80000000` zijn legacy;
+   voor andere bedrijven hoeven ze geen beslisvoorwaarden te zijn.
+4. Controleer lokaal:
+
+   ```sh
+   uv run --locked python tender_scan.py --config profiles/jan-snel.json --validate-config
+   ```
+
+5. Maak onder GitHub Settings > Environments een Environment per bedrijf.
+   Stel daar `OPENAI_API_KEY`, `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`,
+   `SMTP_PASSWORD` en `MAIL_TO` in waar nodig. Zet klantgebonden waarden op
+   Environment-niveau; ontbrekende waarden kunnen anders terugvallen op
+   bestaande repository-secrets. Stop secrets en ontvangers niet in profielbestanden.
+6. Commit/push de bestanden. Kies Actions > Company Tender Scan > Run workflow,
+   geef het configuratiepad op en kies het Environment. E-mail is standaard uit.
+   Het invulprofiel heeft ook `scan.analyze_openai=false`: zet dit pas op `true`
+   nadat je de prompt hebt ingevuld. Zonder AI zijn er geen AI-GO-resultaten.
+
+Een profiel bevat `schema_version`, `id`, `api`, `filters`, `scan`, `prompt_file`.
+De `scan`-opties zijn `days`, `pages`, `throttle`, `zip_max_mb`,
+`zip_follow_nested`, `analyze_openai` en optioneel `openai_model`.
+Bestaande CLI-opties overschrijven de profielwaarden. Paginagrootte is momenteel
+vast 50; `pages` bepaalt het maximum aantal pagina's. Zonder `--config` blijft
+de bestaande bediening beschikbaar.
+
+### Een aparte geplande workflow per bedrijf
+
+Ieder bedrijf krijgt een eigen aanroepbestand met een eigen `schedule` en
+Environment. Voor Jan Snel staat dit klaar in
+`.github/workflows/jan-snel-tender-scan.yml`: dagelijks om 07:15 Nederlandse tijd
+wordt gecontroleerd of het bedrijf aan de beurt is. Het bedrijfsprofiel blijft
+`profiles/jan-snel.json`. Stel daarin de frequentie in:
+
+```json
+"schedule": {
+  "enabled": true,
+  "interval_days": 3,
+  "start_date": "2026-11-24"
+}
+```
+
+`interval_days` mag 1, 2, 3, 7 of 14 zijn. De startdatum is de eerste scandag;
+daarna volgen startdatum + N dagen, + 2N dagen, enzovoort. Bij 7 dagen bepaalt
+de startdatum dus de weekdag. `enabled: false` schakelt geplande scans uit.
+Handmatig starten omzeilt de planning. Jan Snel staat standaard op dagelijks (1).
+De scanner gebruikt automatisch minstens `interval_days + 1` terugkijkdagen;
+een ruimere `scan.days` blijft behouden. Expliciete CLI-opties kunnen dit overrulen.
+Nieuwe bedrijfsworkflows kunnen dezelfde dagelijkse trigger en
+`respect_schedule: ${{ github.event_name == 'schedule' }}` gebruiken bij de
+aanroep van de herbruikbare workflow. Alleen op een scandag starten de
+documentdownloads, AI-analyse en rapportage; de dagelijkse controle zelf is
+een kleine Actions-job.
+Mailen en AI-analyse staan voor dit profiel nog uit en moeten afzonderlijk
+worden ingeschakeld wanneer gewenst.
+
+Het interval staat in het bedrijfsprofiel, het tijdstip in de bedrijfsworkflow:
+
+| Gewenste frequentie | Planning | Aanbevolen terugkijkperiode met overlap |
+| --- | --- | --- |
+| Dagelijks | Dagelijkse cron | 2 dagen |
+| Iedere 2 dagen | Dagelijkse trigger plus profielinterval 2 | 3 dagen |
+| Iedere 3 dagen | Dagelijkse trigger plus profielinterval 3 | 4 dagen |
+| Wekelijks | Cron met vaste weekdag | 8 dagen |
+| Iedere 14 dagen | Dagelijkse trigger plus profielinterval 14 | 15 dagen |
+
+De intervalcontrole werkt over maand- en jaargrenzen heen. Gebruik hiervoor
+geen `*/2`, `*/3` of `*/14` in het dag-van-de-maandveld: dit begint bij iedere
+nieuwe maand opnieuw en vormt geen doorlopend interval. De frequentie uit de
+website-export moet momenteel handmatig worden overgenomen als `interval_days`.
+Een profielwijziging wijzigt de effectieve scandagen, niet de dagelijkse cron.
+Gemiste of mislukte scandagen worden nog niet automatisch ingehaald; hiervoor
+is blijvende opslag van de laatste succesvolle scan nodig.
+
+GitHub ondersteunt `timezone: Europe/Amsterdam` naast `cron` zodat een gekozen
+Nederlandse tijd ook bij zomer-/wintertijd gelijk blijft. Zonder `timezone`
+geldt UTC, zoals bij de bestaande wekelijkse scan. Zie de
+[officiële schedule-documentatie](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+Geplande uitvoeringen kunnen vertraagd starten; cron is geen garantie voor een
+exact begintijdstip. Zonder blijvende deduplicatie kan overlap dubbele resultaten
+opleveren.
+
+De handmatige workflow is al toegevoegd. Voor een eigen planning maak je een
+klein bestand in `.github/workflows/` dat de gedeelde workflow aanroept:
+
+```yaml
+name: Scan Mijn Bedrijf
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: scan-mijn-bedrijf
+  cancel-in-progress: false
+jobs:
+  scan:
+    uses: ./.github/workflows/reusable-tender-scan.yml
+    with:
+      config: profiles/mijn-bedrijf.json
+      environment: mijn-bedrijf
+      send_email: true
+    secrets: inherit
+```
+
+De cron hierboven draait maandag om 06:00 UTC (07:00 Nederlandse wintertijd,
+08:00 zomertijd). Kies een terugkijkperiode die minstens de scanfrequentie
+dekt, liefst met overlap. Er is nog geen blijvende deduplicatie tussen runs:
+overlap kan dezelfde tender opnieuw analyseren en mailen. Elke job heeft een
+eigen runner en het artifact krijgt het Environment in zijn naam. Infrastructuur,
+documentverwerking en e-mailopmaak worden gedeeld via de herbruikbare workflow.
+De workflows zijn lokaal toegevoegd; ze zijn nog niet naar GitHub gepusht of uitgevoerd.
+
+### Onderzoek: TenderNed PAPI
+
+De openbare JSON-publicatiewebservice staat op
+`https://www.tenderned.nl/papi/tenderned-rs-tns/v2`.
+Dit is de service die deze scanner gebruikt. De overheid waarschuwt dat de
+webservice zonder voorafgaande kennisgeving kan veranderen
+([datasetbeschrijving](https://data.overheid.nl/dataset/aankondigingen-van-overheidsopdrachten---tenderned)).
+De [officiële Swagger](https://www.tenderned.nl/info/swagger/) documenteert de
+XML-interface `GET /publicaties/{publicatieId}/public-xml`, met Basic Auth,
+aan te vragen via functioneelbeheer@tenderned.nl. Deze XML-interface levert
+publicaties vanaf 4 april 2018 en is geen documentatie van alle JSON-zoekfilters.
+
+De onderstaande lijst bevat alle 20 queryparameters die de officiële frontend
+bij `getPublicaties` opbouwt, gecontroleerd in de
+[zoekmodule 4244](https://www.tenderned.nl/aankondigingen/4244.b397d72c1b9e555a.js)
+van het [aankondigingenplatform](https://www.tenderned.nl/aankondigingen/overzicht).
+Dit is een volledige inventarisatie van die frontend-aanroep, geen garantie dat
+er geen andere interne/backendparameters bestaan. De filterwerking is uit de
+officiële broncode afgeleid; niet elke combinatie is live functioneel getest.
+
+| Queryparameter | Mogelijkheden |
+| --- | --- |
+| `page` | Paginanummer vanaf 0; beheerd door scanner |
+| `size` | Resultaten per pagina; scanner gebruikt 50; servermaximum niet vastgesteld |
+| `search` | Zoektekst in aankondigingen; andere zoeklaag dan documentzoekwoorden |
+| `sort` | Frontend biedt `relevantie` en `tappublicatiedatum`; scanner vereist de laatste |
+| `publicatieType` | Lijst: MAC, VAK, AAO, REC, AGO, AAW; frontend voegt VBE toe bij AAO |
+| `publicatieDatumPreset` | VDG vandaag, GST gisteren, AF7 afgelopen 7 dagen, AF30 afgelopen 30 dagen, AGP aangepaste periode |
+| `publicatieDatumVanaf` | Begindatum, YYYY-MM-DD |
+| `publicatieDatumTot` | Einddatum, YYYY-MM-DD |
+| `nutsCodes` | Lijst geografische codes; volledige codelijst via `/nutscodes` |
+| `typeOpdracht` | Lijst: D diensten, L leveringen, W werken |
+| `nationaalOfEuropees` | Lijst: NL, EU |
+| `aardVanDeOpdracht` | Lijst: OOP overheidsopdracht, OPD opdracht, RAA raamovereenkomst, ERK erkenningsregeling, CCO concessie, PRV prijsvraag, IDA instellen DAS |
+| `procedure` | Lijst met procedurecodes, hieronder |
+| `sluitingsDatumPreset` | VDG vandaag, MRN morgen, KM7 binnen 7 dagen, KM30 binnen 30 dagen, VMN volgende maand, AGP aangepast, TKM alle openstaande, ONB zonder sluitingsdatum |
+| `sluitingsDatumVanaf` | Begindatum, YYYY-MM-DD |
+| `sluitingsDatumTot` | Einddatum, YYYY-MM-DD |
+| `typeAanbestedendeDienst` | Lijst met organisatietypen, hieronder |
+| `aanbestedendeDienstId` | Lijst met opdrachtgever-ID's; opzoeken via `/aanbestedendediensten` |
+| `cpvCodes` | Lijst CPV-codes; frontend gebruikt codewaarden uit CPV-selectie |
+
+De profielconfiguratie ondersteunt alle genoemde filterparameters; `page` en
+`size` beheert de scanner. Gebruik true/false-objecten voor `publicatieType`,
+`typeOpdracht` en `nationaalOfEuropees`, en JSON-lijsten voor de overige
+meerkeuzefilters. De actieve codes worden naar lijsten vertaald: requests
+verstuurt ze als herhaalde queryparameters, bijvoorbeeld
+`typeOpdracht=D&typeOpdracht=L`. Een lege lijst laat de parameter weg.
+Bij een datumbereik kun je `AGP` meegeven. De lokale `scan.days`-controle blijft
+altijd gelden: een ruimer of historisch API-datumbereik verruimt die niet.
+
+Procedurecodes: OPE openbaar; NOP niet-openbaar; CCD concurrentiegerichte dialoog;
+OMB mededinging met onderhandeling; OZB onderhandeling zonder voorafgaande oproep;
+OHP onderhands; OH Open House; INP innovatiepartnerschap; CA concurrentiegerichte
+aanbesteding; APM andere procedure in meerdere fasen; APE andere procedure in één
+fase; VUB verzoek om uitdrukking van belangstelling (spoor).
+
+Typen aanbestedende dienst: `cga` centrale overheid; `def-cont` defensiecontractant;
+`spec-rights-entity` entiteit met bijzondere/uitsluitende rechten; `eu-ins-bod-ag`
+Europese instelling/agentschap of internationale organisatie; `org-sub`
+gesubsidieerde opdrachtgever; `pub-undert` overheidsonderneming; `body-pl`
+publiekrechtelijke instelling; `ra` regionale of plaatselijke instantie.
+
+Provinciekeuzes in de huidige frontend: NL13 Drenthe, NL23 Flevoland, NL12 Friesland,
+NL22 Gelderland, NL11 Groningen, NL42 Limburg, NL41 Noord-Brabant, NL32 Noord-Holland,
+NL21 Overijssel, NL35 Utrecht, NL34 Zeeland, NL36 Zuid-Holland; NL heel Nederland.
+Gebruik voor een actuele volledige lijst het `/nutscodes`-endpoint.
+
+De frontend gebruikt daarnaast de volgende GET-routes onder dezelfde `/v2`-basis:
+
+| Route | Inhoud |
+| --- | --- |
+| `/publicaties` | Zoekresultaten met paginering |
+| `/publicaties/{id}` | Publicatiedetails |
+| `/publicaties/{id}/gerelateerd` | Gerelateerde publicaties |
+| `/publicaties/{id}/html` | HTML van de aankondiging |
+| `/publicaties/{id}/documenten` | Documentlijst met downloadlinks |
+| `/publicaties/{id}/vragen-antwoorden` | Gepubliceerde vragen en antwoorden |
+| `/publicaties/{id}/mededelingen` | Mededelingen |
+| `/aanbestedendediensten?page=0&size=10&search=...` | Opdrachtgevers opzoeken |
+| `/nutscodes` | Geografische codelijst |
+
+Volg voor documentinhoud de downloadlink uit de documentenresponse; de scanner
+doet dit al. De aparte RSS-route is `/papi/tenderned-rs-tns/rss/laatste-publicatie.rss`.
+Er zijn geen bevestigde queryfilters voor bedrijfsgeschiktheid, omzet,
+certificeringen, minimale/maximale opdrachtwaarde of een eigen AI-prompt in deze
+frontend-aanroep. Zulke criteria horen in je lokale selectie en prompt.
+
+### Advies voor klantinrichting
+
+Gebruik API-filters voor brede afbakening, lokale CPV- en documentzoekwoorden
+voor inhoudelijke selectie, en de prompt voor commerciële beoordeling. Een streng
+API-zoekwoord of opdrachtvormfilter kan relevante tenders al uitsluiten voordat
+de scanner de documenten leest. Begin breed en controleer de skiprapporten.
+Een hoofdcode in de lokale CPV-lijst neemt subcodes niet vanzelf mee.
+
+De bestaande website-export (`schema_version: 3`) is nog geen scannerprofiel.
+Neem `scanner_config.cpv_whitelist` en `keywords` over naar `filters`, vertaal
+de bedrijfscontext en commerciële wensen naar de prompt, en stel de planning
+apart in Actions in. `email_frequency_days` plant zelf geen workflow en een
+export met ontvangers hoort niet rechtstreeks als secretsbron te dienen.
+Bij workflows met dagelijkse intervalcontrole neem je `email_frequency_days`
+over als `schedule.interval_days`. Een automatische import/generator en
+deduplicatie zijn mogelijke vervolgstappen.
+
 Automated TenderNed scanner that searches recent Dutch public tenders, filters them by relevant CPV codes, downloads tender documents, scans PDFs and ZIP archives for recruitment/data-related keywords, identifies the main procurement guide (*leidraad*), and optionally performs an AI-based commercial fit assessment.
 
 ## Features

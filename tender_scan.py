@@ -29,6 +29,7 @@ from urllib3.util.retry import Retry
 TNS_BASE = "https://www.tenderned.nl/papi/tenderned-rs-tns/v2/publicaties"
 WEB_BASE = "https://www.tenderned.nl"
 HEADERS  = {"User-Agent": "tenderned-cpv-key/0.5 (+cli-zip)"}
+CONFIGURED_API_PARAMS = None
 
 # ==== Robustness settings ====
 # Netwerk: we willen nooit onbepaald wachten; per netwerk-operatie max ~60s.
@@ -139,6 +140,11 @@ def build_tenderned_list_params(page=0, size=50):
         "page": page,
         "size": size,
     }
+    if CONFIGURED_API_PARAMS is not None:
+        params.update({key: value for key, value in CONFIGURED_API_PARAMS.items()
+                       if value != [] and value != "" and value is not None})
+        params["sort"] = "tappublicatiedatum"
+        return params
 
     publicatie_types = active_filter_codes(PUBLICATIE_TYPE_FILTERS)
     type_opdrachten = active_filter_codes(TYPE_OPDRACHT_FILTERS)
@@ -1508,7 +1514,23 @@ def main():
     ap.add_argument("--zip_follow_nested", action="store_true", help="Volg nested ZIPs (zip-in-zip). Default: uit.")
     ap.add_argument("--analyze_openai", action="store_true", help="Upload/analyseer de beste leidraad-kandidaat via OpenAI. Vereist OPENAI_API_KEY.")
     ap.add_argument("--openai_model", default=OPENAI_MODEL_DEFAULT, help=f"OpenAI model voor analyse (default: {OPENAI_MODEL_DEFAULT}).")
+    ap.add_argument("--config", help="Bedrijfsprofiel JSON; CLI-opties overschrijven scaninstellingen.")
+    ap.add_argument("--validate-config", action="store_true", help="Controleer profiel zonder netwerk- of AI-aanroepen.")
     args = ap.parse_args()
+    if args.validate_config and not args.config:
+        ap.error("--validate-config vereist --config")
+    if args.config:
+        from scanner_config import load_config, apply_config
+        try:
+            config = load_config(args.config)
+        except (ValueError, OSError, TypeError) as exc:
+            ap.error(str(exc))
+        if args.validate_config:
+            print(f"Configuratie geldig: {config['id']}")
+            return 0
+        apply_config(sys.modules[__name__], config)
+        ap.set_defaults(**config["scan"])
+        args = ap.parse_args()
 
     return scan_recent(
         days_back=args.days,

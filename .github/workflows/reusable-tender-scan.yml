@@ -1,0 +1,86 @@
+name: Reusable Tender Scan
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      send_email:
+        type: boolean
+        default: false
+      respect_schedule:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  planning:
+    runs-on: ubuntu-latest
+    outputs:
+      run_scan: ${{ steps.planning.outputs.run_scan }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check company scan interval
+        id: planning
+        env:
+          SCAN_CONFIG: ${{ inputs.config }}
+          RESPECT_SCHEDULE: ${{ inputs.respect_schedule }}
+        run: python3 scan_schedule.py --config "$SCAN_CONFIG"
+  scan:
+    needs: planning
+    if: needs.planning.outputs.run_scan == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.3"
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run offline tests
+        run: uv run --locked python -m unittest discover -s tests -v
+      - name: Validate company configuration
+        env:
+          SCAN_CONFIG: ${{ inputs.config }}
+        run: uv run --locked python tender_scan.py --config "$SCAN_CONFIG" --validate-config
+      - name: Run company scan
+        env:
+          SCAN_CONFIG: ${{ inputs.config }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run --locked python tender_scan.py --config "$SCAN_CONFIG" --download_dir recent_downloads
+      - name: Create mail summary
+        id: mail_summary
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          uv run --locked python go_mail_report.py
+          --results recent_downloads/current_scan_results.json
+          --output_dir recent_downloads --run_url "$RUN_URL"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tender-results-${{ inputs.environment }}
+          path: recent_downloads/
+      - name: Send company email
+        if: inputs.send_email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: ${{ steps.mail_summary.outputs.subject }}
+          to: ${{ secrets.MAIL_TO }}
+          from: Tender Bot <${{ secrets.SMTP_USERNAME }}>
+          secure: true
+          body: file://recent_downloads/mail_summary.txt
+          attachments: ${{ steps.mail_summary.outputs.attachments }}

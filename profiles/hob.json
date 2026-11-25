@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "hob",
+  "api": {
+    "publicatieType": {
+      "MAC": false,
+      "VAK": true,
+      "AAO": true,
+      "REC": true,
+      "AGO": false,
+      "AAW": false
+    },
+    "typeOpdracht": {
+      "D": true,
+      "L": true,
+      "W": false
+    },
+    "nationaalOfEuropees": {
+      "NL": true,
+      "EU": true
+    }
+  },
+  "filters": {
+    "cpv_whitelist": [
+      "72000000",
+      "72100000",
+      "72200000",
+      "72210000",
+      "72220000",
+      "72221000",
+      "72230000",
+      "72240000",
+      "72250000",
+      "72260000",
+      "72263000",
+      "72300000",
+      "72310000",
+      "72320000",
+      "73000000",
+      "79000000",
+      "79410000",
+      "79600000",
+      "79610000",
+      "79611000",
+      "79612000",
+      "79620000",
+      "79621000",
+      "79330000-6",
+      "75131100-4"
+    ],
+    "keywords": [
+      "detachering",
+      "personeelsinhuur",
+      "terbeschikkingstelling",
+      "recruitment",
+      "data governance",
+      "data stewardship",
+      "data engineer",
+      "data scientist",
+      "data architect",
+      "power-bi",
+      "powerbi",
+      "power bi",
+      "azure",
+      "aws",
+      "python",
+      "devops",
+      "software developer",
+      "it architect",
+      "data-specialist",
+      "data-engineering",
+      "data-analyse",
+      "data-science",
+      "busines analist",
+      "business analyst",
+      "proces analist",
+      "procesanalist",
+      "proces manager",
+      "procesmanager"
+    ]
+  },
+  "scan": {
+    "days": 8,
+    "pages": 1000,
+    "analyze_openai": true
+  },
+  "prompt_file": "../prompts/hob.txt"
+}
