@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 import hashlib
 import os
+import re
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import psycopg
@@ -14,12 +16,52 @@ class DatabaseError(RuntimeError):
     pass
 
 
+def connection_error_message(exc):
+    """Classify locally; never print driver messages, which may contain credentials."""
+    text = str(exc).lower()
+    state = getattr(exc, "sqlstate", None)
+    if "tenant or user not found" in text:
+        return "DB_PROJECT: poolerhost en gebruikersnaam horen niet bij hetzelfde project. Kopieer de host uit Supabase Connect en gebruik scanner_worker.PROJECT_REF."
+    if state == "28P01" or "password authentication failed" in text or "sasl authentication failed" in text:
+        return "DB_AUTH: database weigert het wachtwoord. Gebruik het wachtwoord van scanner_worker (niet postgres) en URL-codeer speciale tekens in de URI."
+    if "not permitted to log in" in text:
+        return "DB_LOGIN: scanner_worker heeft nog geen LOGIN-recht; controleer ALTER ROLE scanner_worker LOGIN in Supabase."
+    if "circuit breaker" in text or "too many authentication" in text:
+        return "DB_AUTH_LIMIT: pooler blokkeert tijdelijk na mislukte inlogpogingen. Controleer de gegevens en wacht voordat je opnieuw test."
+    if state == "53300" or "too many connections" in text or "max client connections" in text:
+        return "DB_CAPACITY: database/pooler heeft te veel verbindingen; probeer later opnieuw."
+    if "certificate" in text or "ssl" in text or "tls" in text:
+        return "DB_TLS: de beveiligde verbinding mislukt. Controleer TLS-instellingen en bij verify-full het CA-certificaat; schakel TLS niet uit."
+    if any(term in text for term in ("could not translate host", "name or service not known", "getaddrinfo", "nodename nor servname", "failed to resolve")):
+        return "DB_DNS: de databasehost kan niet worden gevonden. Kopieer de exacte Session pooler-host uit Supabase Connect."
+    if "timeout" in text or "timed out" in text:
+        return "DB_TIMEOUT: database/pooler reageert niet op tijd. Controleer of het project actief is en of netwerkrestricties GitHub Actions toelaten."
+    if any(term in text for term in ("connection refused", "network is unreachable", "no route to host", "permission denied")):
+        return "DB_NETWORK: de verbinding wordt geweigerd of geblokkeerd. Controleer projectstatus, Session pooler-poort 5432 en netwerkrestricties."
+    if state == "3D000" or "database" in text and "does not exist" in text:
+        return "DB_NAME: de opgegeven database bestaat niet; Supabase gebruikt normaal database postgres."
+    if state == "28000" or "no pg_hba.conf entry" in text:
+        return "DB_ACCESS: toegang geweigerd; controleer gebruikersrol, LOGIN, TLS en netwerkrestricties."
+    if any(term in text for term in ("invalid dsn", "invalid connection", "missing ", "invalid percent", "invalid integer", "invalid uri")):
+        return "DB_URI: ongeldige verbindingsstring. Gebruik de volledige PostgreSQL-URI en URL-codeer het wachtwoord."
+    return "DB_CONNECTION: databaseverbinding mislukt; controleer de database-/poolerlogs in Supabase voor de serveroorzaak."
+
+
 def connect_database():
     dsn = os.environ.get("SCANNER_DATABASE_URL")
     if not dsn:
         raise DatabaseError("SCANNER_DATABASE_URL ontbreekt; geen terugval naar een stateloze scan")
     try:
+        dsn = dsn.strip()
+        if dsn.startswith(("postgresql://", "postgres://")):
+            if re.search(r"%(?![0-9a-fA-F]{2})", dsn) or urlsplit(dsn).netloc.count("@") > 1:
+                raise DatabaseError("DB_URI: URL-codeer speciale tekens in het wachtwoord, bijvoorbeeld @ als %40 en % als %25")
         options = conninfo_to_dict(dsn)
+        if options.get("host", "").endswith(".pooler.supabase.com"):
+            if not re.fullmatch(r"scanner_worker\.[a-z0-9]+", options.get("user", "")):
+                raise DatabaseError("DB_USER: gebruik bij de Supabase-pooler scanner_worker.PROJECT_REF als gebruikersnaam")
+            if options.get("port", "5432") != "5432":
+                raise DatabaseError("DB_PORT: deze scanner vereist Session pooler op poort 5432, geen Transaction pooler")
         if options.get("sslmode", "require") not in {"require", "verify-ca", "verify-full"}:
             raise DatabaseError("Gebruik sslmode=require of verify-full voor de databaseverbinding")
         options.setdefault("sslmode", "require")
@@ -29,7 +71,7 @@ def connect_database():
         raise
     except Exception as exc:
         # Connection strings, credentials and server error details never enter logs.
-        raise DatabaseError(f"Databaseverbinding mislukt ({type(exc).__name__}); controleer secret, netwerk en TLS") from None
+        raise DatabaseError(connection_error_message(exc)) from None
 
 
 class Store:

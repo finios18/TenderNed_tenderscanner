@@ -70,6 +70,17 @@ het secret veilig als lokale omgevingsvariabele hebt ingesteld:
 uv run --locked python database_scan.py --config profiles/jan-snel.json --check-connection
 ```
 
+Dit kan ook zonder lokale secrets via **Actions → Company Tender Scan →
+Run workflow → check_database_only=true**. Deze optie controleert alleen de
+verbinding en leesrechten op de vijf scannertabellen; hij doet geen
+TenderNed-, OpenAI- of mailaanroepen en wijzigt geen scanvoortgang.
+Bij verbindingsfouten verschijnt een veilige foutcategorie (`DB_AUTH`,
+`DB_USER`, `DB_PROJECT`, `DB_DNS`, `DB_TIMEOUT`, `DB_TLS`, enzovoort),
+zonder oorspronkelijke drivertekst, wachtwoord of verbindingsstring te loggen.
+Controleer bij `DB_AUTH` het wachtwoord van `scanner_worker`, bij
+`DB_PROJECT` de combinatie projectreferentie/poolerhost en bij `DB_USER`
+het gebruikersformaat `scanner_worker.PROJECT_REF`.
+
 Na een geslaagde proef zet je `use_database: true` in de `with`-sectie van de
 bedrijfsworkflow. Dat schakelt ook de geplande uitvoeringen om. Laat e-mail aan
 of uit via `send_email`. In de databasevariant verstuurt Python de mail met

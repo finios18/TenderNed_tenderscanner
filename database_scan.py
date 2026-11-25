@@ -275,7 +275,12 @@ def main():
         config = load_config(args.config)
         with connect_database() as connection:
             if args.check_connection:
-                connection.execute("SELECT company_id FROM scanner.companies LIMIT 0")
+                try:
+                    for table in ("companies", "runs", "publications", "notifications", "mail_batches"):
+                        # Fixed internal table names; never supplied by the user.
+                        connection.execute(f"SELECT * FROM scanner.{table} LIMIT 0")
+                except Exception:
+                    raise DatabaseError("DB_SCHEMA: verbinding geslaagd, maar scannertabellen of leesrechten ontbreken. Controleer de SQL-migratie en rolrechten.") from None
                 print("Databaseverbinding en leesrechten op scannertabellen gecontroleerd")
                 return 0
             import tender_scan

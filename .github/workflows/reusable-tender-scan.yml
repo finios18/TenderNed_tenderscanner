@@ -18,6 +18,9 @@ on:
       use_database:
         type: boolean
         default: false
+      check_database_only:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,6 +69,7 @@ jobs:
         env:
           SCAN_CONFIG: ${{ inputs.config }}
           SCANNER_DATABASE_URL: ${{ secrets.SCANNER_DATABASE_URL }}
+          CHECK_DATABASE_ONLY: ${{ inputs.check_database_only }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           RESPECT_SCHEDULE: ${{ inputs.respect_schedule }}
           SEND_EMAIL: ${{ inputs.send_email }}
@@ -75,7 +79,12 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: uv run --locked python database_scan.py --config "$SCAN_CONFIG" --output-dir recent_downloads
+        run: |
+          if [ "$CHECK_DATABASE_ONLY" = "true" ]; then
+            uv run --locked python database_scan.py --config "$SCAN_CONFIG" --check-connection
+          else
+            uv run --locked python database_scan.py --config "$SCAN_CONFIG" --output-dir recent_downloads
+          fi
       - name: Create mail summary
         if: ${{ !inputs.use_database }}
         id: mail_summary
@@ -86,7 +95,7 @@ jobs:
           --results recent_downloads/current_scan_results.json
           --output_dir recent_downloads --run_url "$RUN_URL"
       - name: Upload results
-        if: always()
+        if: ${{ always() && !inputs.check_database_only }}
         uses: actions/upload-artifact@v4
         with:
           name: tender-results-${{ inputs.environment }}
