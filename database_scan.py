@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import smtplib
+import traceback
 from ssl import create_default_context
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,24 @@ from scanner_database import DatabaseError, Store, connect_database
 
 class IncompleteRetrieval(RuntimeError):
     pass
+
+
+class IncompleteScan(RuntimeError):
+    """Controlled operational message, safe for console and stored run status."""
+
+
+def error_message(exc):
+    if isinstance(exc, (IncompleteRetrieval, IncompleteScan, DatabaseError)):
+        return str(exc)
+    # Exception messages and source lines can contain credentials or request data.
+    frames = traceback.extract_tb(exc.__traceback__)
+    location = " > ".join(f"{Path(f.filename).name}:{f.lineno} ({f.name})" for f in frames)
+    return f"Onverwachte fout ({type(exc).__name__})" + (f"; locatie: {location}" if location else "")
+
+
+def log_event(event, **fields):
+    print(json.dumps({"timestamp": datetime.now(ZoneInfo("Europe/Amsterdam")).isoformat(),
+                      "event": event, **fields}, ensure_ascii=False), flush=True)
 
 
 def digest(value):
@@ -189,7 +208,7 @@ def deliver_mail(store, batch, output_dir, github_url):
         store.mail_status(batch["batch_id"], "sending")
         refused = smtp.send_message(message)
         if refused:
-            raise RuntimeError("Niet alle ontvangers hebben het bericht geaccepteerd; controleer mailbatch")
+            raise IncompleteScan("Niet alle ontvangers hebben het bericht geaccepteerd; controleer mailbatch")
         store.mail_status(batch["batch_id"], "sent")
 
 
@@ -217,6 +236,10 @@ def run_scan(scanner, store, config, output_dir, today, scheduled=False, send_em
         output_dir.mkdir(parents=True, exist_ok=True)
         results, issues = [], []
         retrieval_complete = False
+        status, error, stage = "running", None, "retrieval"
+        log_event("scan_started", run_id=str(run_id), company_id=company_id,
+                  window_from=str(start), window_through=str(end),
+                  zip_max_mb=config["scan"]["zip_max_mb"])
         try:
             if start <= end:
                 for pid, item in retrieve_items(scanner, start, end, config["scan"]["pages"]):
@@ -225,7 +248,12 @@ def run_scan(scanner, store, config, output_dir, today, scheduled=False, send_em
                     store.save_publication(company_id, pid, fingerprint, selection_hash, payload)
                 store.advance_retrieval(company_id, end)
             retrieval_complete = True
+            stage = "processing"
+            log_event("retrieval_complete", run_id=str(run_id))
             for row in store.pending(company_id, selection_hash):
+                log_event("publication_started", run_id=str(run_id),
+                          publication_id=row["publication_id"], attempts=row["attempts"])
+                diagnostics = []
                 try:
                     # Refresh incomplete metadata/doc lists before a retry, including old publications.
                     if row["attempts"]:
@@ -235,38 +263,60 @@ def run_scan(scanner, store, config, output_dir, today, scheduled=False, send_em
                         row.update(payload=payload, fingerprint=fingerprint)
                     report = process_one(scanner, config, row, output_dir / "publications" / row["publication_id"])
                     result, retry_reason = outcome(report)
+                    if retry_reason:
+                        diagnostics = [{key: event.get(key, "") for key in
+                                        ("reason", "document_name", "document_type", "detail")}
+                                       for event in report["events"]]
                 except Exception as exc:
-                    result, retry_reason = None, f"Verwerking mislukt ({type(exc).__name__})"
+                    result, retry_reason = None, error_message(exc)
                 store.save_processing(row, result, retry_reason)
                 if result:
                     results.append(result)
                 if retry_reason:
-                    issues.append({"publication_id": row["publication_id"], "reason": retry_reason})
+                    issue = {"publication_id": row["publication_id"], "reason": retry_reason,
+                             "diagnostics": diagnostics}
+                    issues.append(issue)
+                    log_event("publication_retry_required", run_id=str(run_id), **issue)
+                else:
+                    log_event("publication_complete", run_id=str(run_id),
+                              publication_id=row["publication_id"],
+                              decision=result["analysis"]["decision"] if result else "filtered_out")
             (output_dir / "current_scan_results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
             remaining = store.unfinished_count(company_id, selection_hash)
+            stage = "mail" if send_email else "report"
             if send_email:
                 # Prepared batches from earlier attempts are sent before new batches.
                 # At most one batch per execution; remaining queued GO's are picked up next run.
                 batch = store.prepare_mail(company_id, selection_hash, os.environ["MAIL_TO"])
                 deliver_mail(store, batch, output_dir, github_url)
                 if store.outstanding_mail_count(company_id, selection_hash):
-                    raise RuntimeError("Er staan nog GO-resultaten klaar voor een volgende mailbatch")
+                    raise IncompleteScan("Er staan nog GO-resultaten klaar voor een volgende mailbatch")
             else:
                 create_mail_report(results, output_dir, github_url)
             if remaining:
-                raise RuntimeError(f"{remaining} publicaties wachten op herverwerking; zie database en artifact")
+                stage = "processing"
+                raise IncompleteScan(f"{remaining} publicaties wachten op herverwerking; "
+                                     "zie publication_retry_required en database_run.json / processing_issues")
+            stage = "finalize"
             store.complete_day(company_id, today)
             store.finish_run(run_id, "complete")
+            status = "complete"
+            log_event("scan_complete", run_id=str(run_id), analyzed=len(results))
             return True
         except Exception as exc:
             # Store a controlled error; do not persist potentially secret-bearing exception text.
-            error = str(exc) if isinstance(exc, (IncompleteRetrieval, DatabaseError)) else f"Uitvoering onvolledig ({type(exc).__name__})"
-            store.finish_run(run_id, "incomplete" if retrieval_complete else "failed", error)
+            error = error_message(exc)
+            status = "incomplete" if retrieval_complete else "failed"
+            log_event("scan_failed", run_id=str(run_id), stage=stage, status=status,
+                      error=error, processing_issue_count=len(issues))
+            store.finish_run(run_id, status, error)
             raise
         finally:
             (output_dir / "database_run.json").write_text(json.dumps({
                 "run_id": run_id, "company_id": company_id, "window_from": str(start), "window_through": str(end),
                 "retrieval_complete": retrieval_complete, "processing_issues": issues,
+                "status": status, "stage": stage, "error": error,
+                "zip_max_mb": config["scan"]["zip_max_mb"],
             }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -299,7 +349,7 @@ def main():
                     output.write(f"did_run={str(did_run).lower()}\n")
         return 0
     except Exception as exc:
-        message = str(exc) if isinstance(exc, (IncompleteRetrieval, DatabaseError, ValueError)) else f"Database-scan mislukt ({type(exc).__name__}); raadpleeg runstatus"
+        message = str(exc) if isinstance(exc, ValueError) else error_message(exc)
         print(message)
         return 1
 

@@ -155,6 +155,7 @@
     ]
   },
   "scan": {
+    "zip_max_mb": 350.0,
     "days": 2,
     "pages": 1000,
     "analyze_openai": true

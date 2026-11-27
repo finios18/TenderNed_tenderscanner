@@ -92,6 +92,47 @@ class RetrievalTests(unittest.TestCase):
 
 
 class ProcessingTests(unittest.TestCase):
+    def test_controlled_error_visible_but_unexpected_exception_text_hidden(self):
+        self.assertEqual(db.error_message(db.IncompleteScan("1 publicatie wacht op herverwerking")),
+                         "1 publicatie wacht op herverwerking")
+        try:
+            raise RuntimeError("postgresql://user:private@database/test")
+        except RuntimeError as exc:
+            message = db.error_message(exc)
+        self.assertIn("RuntimeError", message)
+        self.assertIn("test_database_scan.py:", message)
+        self.assertNotIn("private", message)
+
+    def test_oversized_zip_diagnostics_reach_console_and_artifact(self):
+        config = load_config(ROOT / "profiles/jan-snel.json")
+        config["scan"]["analyze_openai"] = False
+        self.assertEqual(config["scan"]["zip_max_mb"], 350.0)
+        store = Mock()
+        store.company_lock.return_value = nullcontext()
+        store.start_run.return_value = "test-run"
+        store.company.return_value = {"retrieved_through": None, "last_completed_day": None}
+        store.pending.return_value = [{"publication_id": "450963", "attempts": 0}]
+        store.unfinished_count.return_value = 1
+        report = {"events": [{"reason": "zip_too_large", "document_name": "Bijlage E",
+                              "document_type": "zip", "detail": "399.9 MB > 350.0 MB"},
+                             {"reason": "no_content_keyword_match"}], "results": []}
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, patch.object(db, "apply_config"), \
+                patch.object(db, "selection_digest", return_value="config"), \
+                patch.object(db, "retrieve_items", return_value=iter([])), \
+                patch.object(db, "process_one", return_value=report), contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(db.IncompleteScan, "1 publicaties wachten"):
+                db.run_scan(Mock(), store, config, directory, date(2026, 11, 26))
+            artifact = json.loads((Path(directory) / "database_run.json").read_text(encoding="utf-8"))
+        self.assertEqual(artifact["status"], "incomplete")
+        self.assertEqual(artifact["stage"], "processing")
+        self.assertEqual(artifact["processing_issues"][0]["diagnostics"][0]["detail"], "399.9 MB > 350.0 MB")
+        self.assertIn("399.9 MB > 350.0 MB", output.getvalue())
+        self.assertIn("publication_retry_required", output.getvalue())
+        self.assertIn("450963", output.getvalue())
+        self.assertEqual(store.finish_run.call_args.args[2], artifact["error"])
+        store.complete_day.assert_not_called()
+
     def test_supplied_publication_bypasses_legacy_days_and_network_list(self):
         import tender_scan
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), \

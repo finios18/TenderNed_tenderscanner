@@ -65,6 +65,19 @@ de scanner maakt geen Supabase-projecten, tabellen of secrets automatisch aan.
    Inspecteer het artifact `database_run.json`, de publicatierapporten en de
    tabellen hieronder. Dit kan OpenAI-kosten maken als AI aanstaat.
 
+Bij een mislukte database-run zoek je in de Actions-log naar `scan_failed` en
+`publication_retry_required`. Deze JSON-logregels bevatten een tijdstip, run-ID,
+fase en foutreden; documentproblemen vermelden ook documentnaam en details
+(bijvoorbeeld `399.9 MB > 350.0 MB`). Het artifact `database_run.json` bevat
+`status`, `stage`, `error`, de gebruikte `zip_max_mb` en `processing_issues`
+met dezelfde documentdetails. Onverwachte fouten tonen het exceptiontype en
+bestands-/regelnummers zonder de mogelijk gevoelige exceptiontekst.
+
+Voor Jan Snel staat `scan.zip_max_mb` expliciet op 350 MB. Een te grote ZIP
+blijft een onvolledige verwerking en wordt bij een volgende run opnieuw geprobeerd.
+Een wijziging van deze limiet wijzigt ook de selectievingerafdruk, waardoor eerder
+opgeslagen publicaties opnieuw verwerkt kunnen worden.
+
 Optioneel kun je lokaal alleen de verbinding en leesrechten controleren nadat je
 het secret veilig als lokale omgevingsvariabele hebt ingesteld:
 
